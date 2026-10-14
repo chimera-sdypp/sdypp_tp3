@@ -1,0 +1,21 @@
+# Etapa 2: N workers + el master que reparte.
+#   docker compose up -d --build --scale worker=4 worker
+#   docker compose run --rm -T master < entrada.jpg > salida.png
+services:
+  worker:
+    build: .
+    image: sobel-hit1:local
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  master:
+    image: sobel-hit1:local
+    command: ["python", "master.py", "-", "-"]
+    environment:
+      SOBEL_WORKERS: worker:8080
+      SOBEL_PARTES: ${SOBEL_PARTES:-}
+    # Sin depends_on: `run` volvería a dejar un solo worker. Los workers se levantan antes con `up`.
+    profiles: [master]   # no arranca con `up`: se corre con `run`
