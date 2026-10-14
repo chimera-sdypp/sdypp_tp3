@@ -110,6 +110,7 @@ def main(argv=None):
     def apagar(senal, _frame):
         log.info("%s: el worker deja de aceptar franjas y termina las que tiene en curso",
                  signal.Signals(senal).name)
+        Handler.liberar.set()  # suelta las franjas colgadas: server_close() espera a todos los hilos
         # shutdown() espera a que serve_forever() salga: llamarlo desde este mismo hilo lo traba.
         threading.Thread(target=servidor.shutdown).start()
 

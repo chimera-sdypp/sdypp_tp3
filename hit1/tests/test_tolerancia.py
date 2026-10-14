@@ -209,3 +209,32 @@ def test_sigterm_termina_la_franja_en_curso_y_sale(tmp_path):
             urllib.request.urlopen(f"http://127.0.0.1:{puerto}/health", timeout=1)
     finally:
         proceso.kill()
+
+
+def test_sigterm_suelta_las_franjas_colgadas(tmp_path):
+    """SOBEL_FALLA=colgado: con SIGTERM sale enseguida, sin esperar al SIGKILL del período de gracia."""
+    import os
+    import signal
+    import subprocess
+    import sys
+    import urllib.request
+
+    with socket.socket() as libre:
+        libre.bind(("127.0.0.1", 0))
+        puerto = libre.getsockname()[1]
+    entorno = {**os.environ, "SOBEL_FALLA": "colgado", "SOBEL_LOGS": str(tmp_path)}
+    proceso = subprocess.Popen([sys.executable, "worker.py", "--puerto", str(puerto)], env=entorno)
+    try:
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{puerto}/health", timeout=1).close()
+                break
+            except OSError:
+                time.sleep(0.05)
+        with pytest.raises(OSError):  # timeout: la franja queda colgada
+            urllib.request.urlopen(urllib.request.Request(
+                f"http://127.0.0.1:{puerto}/sobel", data=sobel.a_png(GRIS)), timeout=0.5)
+        proceso.send_signal(signal.SIGTERM)
+        assert proceso.wait(3) == 0
+    finally:
+        proceso.kill()
