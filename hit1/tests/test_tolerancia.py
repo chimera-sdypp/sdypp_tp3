@@ -157,3 +157,44 @@ def test_worker_rechaza_falla_desconocida(monkeypatch):
     monkeypatch.setattr(worker.Handler, "falla", "explotar")
     with pytest.raises(SystemExit):
         worker.main(["--puerto", "0"])
+
+
+def test_sigterm_termina_la_franja_en_curso_y_sale(tmp_path):
+    """Worker como proceso real: SIGTERM a mitad de una franja → la responde y sale con 0."""
+    import os
+    import signal
+    import subprocess
+    import sys
+    import urllib.request
+
+    with socket.socket() as libre:
+        libre.bind(("127.0.0.1", 0))
+        puerto = libre.getsockname()[1]
+    entorno = {**os.environ, "SOBEL_DEMORA": "1", "SOBEL_LOGS": str(tmp_path)}
+    proceso = subprocess.Popen([sys.executable, "worker.py", "--puerto", str(puerto)], env=entorno)
+    try:
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{puerto}/health", timeout=1).close()
+                break
+            except OSError:
+                time.sleep(0.05)
+        respuesta = {}
+
+        def pedir():
+            with urllib.request.urlopen(urllib.request.Request(
+                    f"http://127.0.0.1:{puerto}/sobel", data=sobel.a_png(GRIS)), timeout=5) as r:
+                respuesta["imagen"] = sobel.leer_gris(r.read())
+
+        cliente = threading.Thread(target=pedir)
+        cliente.start()
+        time.sleep(0.3)  # la franja ya está en curso (tarda 1 s por SOBEL_DEMORA)
+        proceso.send_signal(signal.SIGTERM)
+        cliente.join(5)
+
+        assert proceso.wait(5) == 0
+        assert np.array_equal(respuesta["imagen"], sobel.aplicar(GRIS))
+        with pytest.raises(OSError):  # ya no acepta pedidos nuevos
+            urllib.request.urlopen(f"http://127.0.0.1:{puerto}/health", timeout=1)
+    finally:
+        proceso.kill()

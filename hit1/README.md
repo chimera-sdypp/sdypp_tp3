@@ -59,6 +59,10 @@ flowchart LR
 - **Costo**: las franjas del worker colgado vencen en paralelo, así que se pierde un timeout, no uno
   por franja. El peor caso es una franja que cae en un colgado todavía no detectado y espera dos.
 - El timeout tiene que superar lo que tarda una franja: si no, un worker lento pero sano se descarta.
+- **Apagado ordenado**: con SIGTERM (rollout, scale down, `kubectl delete pod`, `docker stop`) el worker
+  deja de aceptar franjas, termina las que tiene en curso y sale con 0, así que un apagado planificado no
+  le cuesta ninguna reasignación al master. Sin el handler, Python como PID 1 ignora SIGTERM: cada pod
+  tardaba los 30 s de gracia en morir y el SIGKILL cortaba la franja que estuviera procesando.
 
 Evidencia (`tests/tolerancia.sh`, 8 franjas, 2 sanos + 1 caído + 1 colgado, `SOBEL_TIMEOUT=3`):
 
@@ -77,8 +81,8 @@ salida también es idéntica a la de la Etapa 1.
 En k3s (14/10/2026), con 4 sanos + `k8s/fallas.yaml` y 12 franjas: 4 reasignaciones, salida idéntica, y
 el Deployment reinició el pod caído (`RESTARTS 1`). Borrando un pod a mitad del trabajo con
 `--grace-period=0 --force`: sus 2 franjas se reasignan, la salida es idéntica y el Deployment crea otro pod.
-Un `kubectl delete pod` normal no sirve para simular la caída: el worker es PID 1 sin handler de SIGTERM,
-así que sigue atendiendo hasta el SIGKILL de los 30 s de gracia y termina sus franjas.
+Un `kubectl delete pod` normal no simula una caída: es un apagado ordenado (ver abajo) y el worker
+termina sus franjas antes de salir.
 
 ## Prerrequisitos cumplidos (Parte 0)
 

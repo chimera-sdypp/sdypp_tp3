@@ -7,11 +7,16 @@ Para probar la Etapa 3 (tolerancia a fallos) el worker puede simular fallos:
     SOBEL_FALLA=caida     el proceso termina al recibir una franja, sin responder
     SOBEL_FALLA=colgado   recibe la franja y nunca responde (/health sigue contestando)
     SOBEL_DEMORA=<s>      demora artificial por franja, para tener tiempo de matar un worker a mano
+
+Con SIGTERM (lo que manda k8s o `docker stop` antes de matar el contenedor) deja de aceptar
+franjas, termina las que tiene en curso y sale. Sin el handler, Python como PID 1 ignora
+SIGTERM y el contenedor recién muere con el SIGKILL del final del período de gracia.
 """
 
 import argparse
 import json
 import os
+import signal
 import socket
 import threading
 import time
@@ -90,16 +95,31 @@ class Handler(BaseHTTPRequestHandler):
         pass  # cada pedido ya queda en el log propio
 
 
+class Servidor(ThreadingHTTPServer):
+    daemon_threads = False  # server_close() espera a que terminen los pedidos en curso
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Worker de Sobel (HTTP).")
     parser.add_argument("--puerto", type=int, default=int(os.environ.get("SOBEL_PUERTO", 8080)))
     args = parser.parse_args(argv)
     if Handler.falla not in FALLAS:
         parser.error(f"SOBEL_FALLA inválida: {Handler.falla!r} (opciones: caida, colgado)")
-    servidor = ThreadingHTTPServer(("0.0.0.0", args.puerto), Handler)
+    servidor = Servidor(("0.0.0.0", args.puerto), Handler)
+
+    def apagar(senal, _frame):
+        log.info("%s: el worker deja de aceptar franjas y termina las que tiene en curso",
+                 signal.Signals(senal).name)
+        # shutdown() espera a que serve_forever() salga: llamarlo desde este mismo hilo lo traba.
+        threading.Thread(target=servidor.shutdown).start()
+
+    signal.signal(signal.SIGTERM, apagar)
+    signal.signal(signal.SIGINT, apagar)
     log.info("worker %s escuchando en el puerto %d%s", NOMBRE, args.puerto,
              f" (simulando falla: {Handler.falla})" if Handler.falla else "")
     servidor.serve_forever()
+    servidor.server_close()
+    log.info("worker %s detenido", NOMBRE)
 
 
 if __name__ == "__main__":
