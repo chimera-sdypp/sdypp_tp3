@@ -1,0 +1,83 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-ex2
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  node-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python subscriber.py
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      EXCHANGE_NAME: blockchain_events
+      NODE_ID: "Nodo-Red-1"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  node-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python subscriber.py
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      EXCHANGE_NAME: blockchain_events
+      NODE_ID: "Nodo-Red-2"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  node-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python subscriber.py
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      EXCHANGE_NAME: blockchain_events
+      NODE_ID: "Nodo-Red-3"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  publisher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python publisher.py
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      EXCHANGE_NAME: blockchain_events
+      NUM_BLOCKS: "5"
+      DELAY_BETWEEN_BLOCKS: "0.4"
+      MINER_ID: "Miner-Node-Alpha"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    profiles:
+      - publisher
