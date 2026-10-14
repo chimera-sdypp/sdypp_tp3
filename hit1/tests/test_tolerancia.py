@@ -47,6 +47,17 @@ class NoImagen(worker.Handler):
         self._responder(200, b"no soy un png", "image/png")
 
 
+class CortaRespuesta(worker.Handler):
+    """Muere a mitad de la respuesta: el master recibe IncompleteRead."""
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        self.send_response(200)
+        self.send_header("Content-Length", "100000")
+        self.end_headers()
+        self.wfile.write(b"\x89PNG parcial")
+        self.close_connection = True
+
+
 class Rechaza(worker.Handler):
     def do_POST(self):
         self._responder(400, {"error": "franja inválida"})
@@ -97,7 +108,7 @@ def test_reasigna_si_un_worker_no_responde(levantar):
     assert time.perf_counter() - inicio < 2
 
 
-@pytest.mark.parametrize("handler", [Error500, NoImagen])
+@pytest.mark.parametrize("handler", [Error500, NoImagen, CortaRespuesta])
 def test_respuestas_rotas_cuentan_como_caida(levantar, handler):
     direcciones = [levantar(handler), levantar(Contador, [])]
     assert np.array_equal(master.procesar(GRIS, direcciones, 4, timeout=5), sobel.aplicar(GRIS))

@@ -12,6 +12,7 @@ recreó) antes de abandonar el trabajo.
 """
 
 import argparse
+import http.client
 import itertools
 import os
 import socket
@@ -76,6 +77,8 @@ def enviar(worker, franja, timeout):
         if isinstance(motivo, TimeoutError):
             raise WorkerCaido(f"el worker {worker} no respondió en {timeout:g} s") from None
         raise WorkerCaido(f"el worker {worker} no está disponible: {motivo}") from None
+    except http.client.HTTPException as error:  # después de OSError: RemoteDisconnected es las dos cosas
+        raise WorkerCaido(f"el worker {worker} cortó la respuesta: {error!r}") from None
     try:
         return sobel.leer_gris(datos)
     except ValueError:
