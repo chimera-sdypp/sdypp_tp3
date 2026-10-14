@@ -19,6 +19,7 @@ spec:
     metadata:
       labels:
         app: sobel-worker
+        rol: sobel-worker                # el Service selecciona por rol (ver k8s/fallas.yaml)
     spec:
       containers:
         - name: worker
@@ -42,6 +43,6 @@ metadata:
 spec:
   clusterIP: None
   selector:
-    app: sobel-worker
+    rol: sobel-worker                    # incluye a los workers con fallas de k8s/fallas.yaml
   ports:
     - port: 8080

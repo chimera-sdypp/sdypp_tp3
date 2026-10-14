@@ -1,15 +1,45 @@
 # Etapa 2: N workers + el master que reparte.
 #   docker compose up -d --build --scale worker=4 worker
 #   docker compose run --rm -T master < entrada.jpg > salida.png
+# Etapa 3: suma un worker que se cae y otro que no responde (perfil `fallas`).
+#   docker compose --profile fallas up -d --build --wait --scale worker=2
+#   SOBEL_TIMEOUT=3 docker compose run --rm -T master < entrada.jpg > salida.png
+x-worker: &worker
+  image: sobel-hit1:local
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+
 services:
   worker:
-    build: .
-    image: sobel-hit1:local
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
+    <<: *worker
+    build: .   # sólo acá: con el builder clásico, varios `build` de la misma imagen chocan
+    environment:
+      SOBEL_DEMORA: ${SOBEL_DEMORA:-0}
+
+  # Los workers con fallas usan el alias `worker`: el DNS los devuelve junto con los sanos,
+  # así que el master les reparte franjas sin saber que van a fallar.
+  worker-caido:
+    <<: *worker
+    pull_policy: never
+    environment:
+      SOBEL_FALLA: caida
+    networks:
+      default:
+        aliases: [worker]
+    profiles: [fallas]
+
+  worker-colgado:
+    <<: *worker
+    pull_policy: never
+    environment:
+      SOBEL_FALLA: colgado
+    networks:
+      default:
+        aliases: [worker]
+    profiles: [fallas]
 
   master:
     image: sobel-hit1:local
@@ -17,5 +47,6 @@ services:
     environment:
       SOBEL_WORKERS: worker:8080
       SOBEL_PARTES: ${SOBEL_PARTES:-}
+      SOBEL_TIMEOUT: ${SOBEL_TIMEOUT:-30}
     # Sin depends_on: `run` volvería a dejar un solo worker. Los workers se levantan antes con `up`.
     profiles: [master]   # no arranca con `up`: se corre con `run`

@@ -20,7 +20,7 @@ jobs:
           ./gitleaks git --redact -v .
 
   hit1:
-    name: Hit 1 — Sobel (tests e integración con Docker)
+    name: Hit 1 — Sobel (tests, integración y tolerancia a fallos con Docker)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -38,3 +38,5 @@ jobs:
         run: python -m pytest -v
       - name: Integración con Docker (3 workers)
         run: PYTHON=python bash tests/integracion.sh
+      - name: Tolerancia a fallos con Docker (worker caído, colgado y docker kill)
+        run: PYTHON=python bash tests/tolerancia.sh
