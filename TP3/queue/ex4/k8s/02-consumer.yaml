@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ex4-consumer
+  labels:
+    app: ex4-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ex4-consumer
+  template:
+    metadata:
+      labels:
+        app: ex4-consumer
+    spec:
+      containers:
+        - name: consumer
+          image: sdypp/ex4-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "consumer.py"]
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-ex4-service"
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_USER
+              value: "guest"
+            - name: RABBITMQ_PASS
+              value: "guest"
+            - name: QUEUE_NAME
+              value: "ex4_task_queue"
+            - name: DLX_EXCHANGE
+              value: "dlx"
+            - name: DLQ_NAME
+              value: "dead_letter_queue"
+            - name: FAIL_PROBABILITY
+              value: "0.5"
+            - name: MAX_RETRIES
+              value: "4"
+            - name: BASE_DELAY_SECONDS
+              value: "1"
+            - name: PROCESSING_TIME
+              value: "0.2"
+            - name: CONSUMER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

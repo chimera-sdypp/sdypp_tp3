@@ -1,0 +1,65 @@
+x-rabbitmq-env: &rabbitmq-env
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_USER: guest
+  RABBITMQ_PASS: guest
+  QUEUE_NAME: ex3_task_queue
+  DLX_EXCHANGE: dlx
+  DLQ_NAME: dead_letter_queue
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-ex3
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  # Una sola imagen para los tres procesos (la misma que usan los manifiestos de k8s).
+  # Solo `consumer` la construye: si cada servicio tuviera `build`, el builder clásico
+  # las construye en paralelo y falla con "image already exists".
+  consumer:
+    image: sdypp/ex3-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python consumer.py
+    environment:
+      <<: *rabbitmq-env
+      PROCESSING_TIME: "0.5"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  dlq-consumer:
+    image: sdypp/ex3-app:latest
+    pull_policy: never
+    command: python dlq_consumer.py
+    environment:
+      <<: *rabbitmq-env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  producer:
+    image: sdypp/ex3-app:latest
+    pull_policy: never
+    command: python producer.py
+    environment:
+      <<: *rabbitmq-env
+      NUM_TASKS: "10"
+      ERROR_EVERY: "3"
+      DELAY_BETWEEN_TASKS: "0.1"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    profiles:
+      - producer
