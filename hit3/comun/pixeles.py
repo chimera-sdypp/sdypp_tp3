@@ -5,11 +5,21 @@ import io
 import numpy as np
 from PIL import Image
 
+# El contrato acepta hasta 100 megapíxeles por archivo (§2). Pillow avisa desde ~89 por defecto (protección contra
+# "decompression bombs") y corta en el doble: con esto avisa recién por encima de 100.
+Image.MAX_IMAGE_PIXELS = 100_000_000
+
 
 def leer_rgb(datos):
-    """Bytes PNG o JPEG → matriz uint8 (alto, ancho, 3). Normaliza a RGB: paletas, grises y CMYK; el alfa se pierde."""
-    with Image.open(io.BytesIO(datos)) as archivo:
-        return np.asarray(archivo.convert("RGB"))
+    """Bytes PNG o JPEG → matriz uint8 (alto, ancho, 3). Normaliza a RGB: paletas, grises y CMYK; el alfa se pierde.
+
+    Lanza ValueError si los bytes no son una imagen o están cortados.
+    """
+    try:
+        with Image.open(io.BytesIO(datos)) as archivo:
+            return np.asarray(archivo.convert("RGB"))
+    except OSError:  # incluye UnidentifiedImageError y "image file is truncated"
+        raise ValueError("no se pudo decodificar") from None
 
 
 def dividir(matriz, partes, filas_de_borde):

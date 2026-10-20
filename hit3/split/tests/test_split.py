@@ -138,3 +138,57 @@ def test_una_imagen_con_menos_filas_que_partes_da_un_fragmento_por_fila(redis):
     assert redis.hget("job:j1:geometria:0", "total") == b"2"
     assert sum(evento[0] == "publicar" for evento in canal.eventos) == 2
     np.testing.assert_array_equal(reconstruir(redis, "j1", 0), original)
+
+
+def test_un_job_de_varios_archivos_reparte_todos(redis):
+    originales = [imagen_rgb(9, 4, semilla=1), imagen_rgb(5, 7, semilla=2), imagen_rgb(12, 3, semilla=3)]
+    cargar_job(redis, "j1", [png(o) for o in originales])
+    canal = CanalQuePublica()
+
+    split.manejador(redis, partes=3)(canal, b'{"job_id": "j1"}')
+
+    for archivo, original in enumerate(originales):
+        np.testing.assert_array_equal(reconstruir(redis, "j1", archivo), original)
+    publicadas = [(e[2]["archivo"], e[2]["fragmento"]) for e in canal.eventos if e[0] == "publicar"]
+    assert publicadas == [(a, f) for a in range(3) for f in range(3)]
+
+
+def reloj(*instantes):
+    """Devuelve los `instantes` en orden y después repite el último."""
+    pendientes = list(instantes)
+    return lambda: pendientes.pop(0) if len(pendientes) > 1 else pendientes[0]
+
+
+def test_registra_el_total_de_fragmentos_del_job_y_lo_que_tardo_el_split(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(9, 4)), png(imagen_rgb(2, 4))])
+
+    split.manejador(redis, partes=3, ahora_ms=reloj(1000, 1250))(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    assert redis.hget("job:j1", "fragmentos_total") == b"5"  # 3 del primero, 2 del segundo (tiene 2 filas)
+    assert redis.hget("job:j1", "t_split_ms") == b"250"
+
+
+@pytest.mark.parametrize("invalido", [b"no soy una imagen", png(imagen_rgb(40, 40))[:200]],
+                         ids=["no_es_imagen", "png_cortado"])
+def test_un_archivo_que_no_se_decodifica_deja_el_job_en_failed_sin_publicar_nada(redis, invalido):
+    cargar_job(redis, "j1", [png(imagen_rgb(6, 4)), invalido])  # creado: 1761055391000
+    canal = CanalQuePublica()
+
+    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(canal, b'{"job_id": "j1"}')
+
+    assert redis.hget("job:j1", "estado") == b"failed"
+    assert json.loads(redis.hget("job:j1", "error")) == {
+        "tipo": "ARCHIVO_INVALIDO", "mensaje": "el archivo 1 no se pudo decodificar"}
+    assert redis.lrange("terminados", 0, -1) == [b"failed 1500"]
+    assert canal.eventos == []
+
+
+def test_terminados_guarda_solo_los_ultimos_1000(redis):
+    redis.rpush("terminados", *[f"done {i}" for i in range(1000)])
+    cargar_job(redis, "j1", [b"no soy una imagen"])
+
+    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    assert redis.llen("terminados") == 1000
+    assert redis.lindex("terminados", 0) == b"failed 1500"
+    assert redis.lindex("terminados", -1) == b"done 998"
