@@ -1,384 +1,552 @@
 {
   "annotations": {
-    "list": [
-      {
-        "builtIn": 1,
-        "datasource": "-- Grafana --",
-        "enable": true,
-        "hide": true,
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
-      }
-    ]
+    "list": []
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
   "links": [],
-  "liveNow": false,
+  "liveNow": true,
   "panels": [
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 100,
-      "title": "Visión General y KPIs de Negocio",
+      "title": "Visi\u00f3n General y KPIs de Negocio",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 1,
+      "title": "Mensajes en Colas (RabbitMQ)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(rabbitmq_queue_messages{queue=~\"sobel.*\"}) or sum(max(sobel_tareas_en_cola) by (cola)) or vector(0)",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 10 },
-              { "color": "red", "value": 50 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
             ]
           },
           "unit": "short"
         }
-      },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
-      "id": 1,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "title": "Mensajes en Colas (RabbitMQ)",
-      "type": "stat",
-      "targets": [
-        {
-          "expr": "sum(rabbitmq_queue_messages{queue=~\"sobel.*\"}) or sum(sobel_tareas_en_cola) or vector(0)",
-          "legendFormat": "Total encolados",
-          "refId": "A"
-        }
-      ]
+      }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "id": 2,
+      "title": "Tasa de Errores (SLO < 1%)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(sobel_pedidos_total{codigo=~\"5..\"}[5m])) / (sum(rate(sobel_pedidos_total[5m])) > 0) * 100) or vector(0)",
+          "refId": "A"
+        }
+      ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 5 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
             ]
           },
           "unit": "percent"
         }
-      },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
-      "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
-      "title": "Tasa de Errores (SLO < 1%)",
-      "type": "stat",
-      "targets": [
-        {
-          "expr": "(sum(rate(sobel_pedidos_total{codigo=~\"5..\"}[5m])) / (sum(rate(sobel_pedidos_total[5m])) > 0) * 100) or vector(0)",
-          "legendFormat": "Error Rate %",
-          "refId": "A"
-        }
-      ]
+      }
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [{ "color": "blue", "value": null }]
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
       "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
       "title": "Workers Activos",
       "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
       "targets": [
         {
-          "expr": "count(up{namespace=\"sobel\", job=~\"sobel-.*worker.*\"} == 1) or vector(0)",
-          "legendFormat": "Workers online",
+          "expr": "count(kube_pod_status_phase{namespace=\"sobel\", phase=\"Running\", pod=~\"(sobel|grises|blur)-worker-.*\"}) or count(up{namespace=\"sobel\", job=~\".*worker.*\"} == 1) or vector(0)",
           "refId": "A"
         }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
+          "color": {
+            "mode": "thresholds"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "green",
+                "value": 2
+              }
             ]
           },
           "unit": "short"
         }
-      },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      }
+    },
+    {
       "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "auto"
-      },
       "title": "Mensajes en DLQ Agotados",
       "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
       "targets": [
         {
           "expr": "rabbitmq_queue_messages{queue=\"sobel.dlq.agotados\"} or vector(0)",
-          "legendFormat": "Agotados",
           "refId": "A"
         }
-      ]
-    },
-    {
-      "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
-      "id": 101,
-      "title": "Patrones de Mensajería (RabbitMQ)",
-      "type": "row"
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "Mensajes",
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "lineWidth": 2
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
           },
           "unit": "short"
         }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 101,
+      "title": "Patrones de Mensajer\u00eda (RabbitMQ)",
+      "type": "row"
+    },
+    {
       "id": 5,
-      "title": "Mensajes en Cola por Tópico/Cola",
+      "title": "Mensajes en Cola por T\u00f3pico/Cola",
       "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
       "targets": [
         {
-          "expr": "rabbitmq_queue_messages{queue=~\"sobel.*\"}",
+          "expr": "rabbitmq_queue_messages{queue=~\"sobel.*\"} or max(sobel_tareas_en_cola) by (cola)",
           "legendFormat": "{{queue}}",
           "refId": "A"
         }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
           "custom": {
-            "axisLabel": "Mensajes / seg",
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2
+            "lineInterpolation": "smooth"
           },
-          "unit": "ops"
+          "unit": "short"
         }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      }
+    },
+    {
       "id": 6,
       "title": "Throughput RabbitMQ: Publicados vs Consumidos",
       "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
       "targets": [
         {
           "expr": "sum(rate(rabbitmq_queue_messages_published_total[1m])) by (queue)",
-          "legendFormat": "Publicados - {{queue}}",
+          "legendFormat": "Publicados: {{queue}}",
           "refId": "A"
         },
         {
           "expr": "sum(rate(rabbitmq_queue_messages_delivered_total[1m])) by (queue)",
-          "legendFormat": "Consumidos - {{queue}}",
+          "legendFormat": "Consumidos: {{queue}}",
           "refId": "B"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "ops"
+        }
+      }
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      },
       "id": 102,
+      "title": "Tareas Procesadas y Errores de Microservicios",
+      "type": "row"
+    },
+    {
+      "id": 11,
+      "title": "Throughput de Tareas Procesadas (sobel_tareas_procesadas_total)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(sobel_tareas_procesadas_total[1m])) by (servicio, operacion, resultado)",
+          "legendFormat": "{{servicio}} - {{operacion}} ({{resultado}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "title": "Tasa de Errores por Servicio y Tipo (sobel_errores_total)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(sobel_errores_total[1m])) by (servicio, tipo)",
+          "legendFormat": "{{servicio}} - {{tipo}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "ops"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "id": 103,
       "title": "Latencias y Tiempos de Procesamiento (SLO)",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "Segundos",
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2
-          },
-          "unit": "s"
-        }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
       "id": 7,
-      "title": "Latencia de Tarea por Operación (p50 / p95 / p99)",
+      "title": "Latencia de Tarea por Operaci\u00f3n (p50 / p95 / p99)",
       "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum(rate(sobel_tiempo_tarea_segundos_bucket[5m])) by (le, operacion))",
-          "legendFormat": "p50 - {{operacion}}",
+          "legendFormat": "p50 {{operacion}}",
           "refId": "A"
         },
         {
           "expr": "histogram_quantile(0.95, sum(rate(sobel_tiempo_tarea_segundos_bucket[5m])) by (le, operacion))",
-          "legendFormat": "p95 - {{operacion}}",
+          "legendFormat": "p95 {{operacion}}",
           "refId": "B"
         },
         {
           "expr": "histogram_quantile(0.99, sum(rate(sobel_tiempo_tarea_segundos_bucket[5m])) by (le, operacion))",
-          "legendFormat": "p99 - {{operacion}}",
+          "legendFormat": "p99 {{operacion}}",
           "refId": "C"
         }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
           "custom": {
-            "axisLabel": "Segundos",
             "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2
+            "lineInterpolation": "smooth"
           },
           "unit": "s"
         }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      }
+    },
+    {
       "id": 8,
       "title": "Tiempo Total de Job (p50 / p95 / p99)",
       "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum(rate(sobel_tiempo_job_segundos_bucket[5m])) by (le))",
-          "legendFormat": "Job p50",
+          "legendFormat": "p50 Total",
           "refId": "A"
         },
         {
           "expr": "histogram_quantile(0.95, sum(rate(sobel_tiempo_job_segundos_bucket[5m])) by (le))",
-          "legendFormat": "Job p95 (SLO <= 30s)",
+          "legendFormat": "p95 Total",
           "refId": "B"
         },
         {
           "expr": "histogram_quantile(0.99, sum(rate(sobel_tiempo_job_segundos_bucket[5m])) by (le))",
-          "legendFormat": "Job p99",
+          "legendFormat": "p99 Total",
           "refId": "C"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "s"
+        }
+      }
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
-      "id": 103,
-      "title": "Consumo de Recursos en Kubernetes (pool=infra y pool=apps)",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 104,
+      "title": "Consumo de Recursos en Kubernetes (Pods y Nodos)",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "custom": {
-            "axisLabel": "Cores",
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "lineWidth": 2
-          },
-          "unit": "short"
-        }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "id": 9,
       "title": "CPU Utilizada por Pod (Namespace sobel)",
       "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
       "targets": [
         {
           "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"sobel\", container!=\"\"}[5m])) by (pod)",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
-      ]
-    },
-    {
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      ],
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
           "custom": {
-            "axisLabel": "Bytes",
             "drawStyle": "line",
-            "fillOpacity": 15,
-            "lineWidth": 2
+            "lineInterpolation": "smooth"
           },
-          "unit": "bytes"
+          "unit": "core"
         }
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      }
+    },
+    {
       "id": 10,
       "title": "Memoria Utilizada por Pod (Namespace sobel)",
       "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
       "targets": [
         {
           "expr": "sum(container_memory_working_set_bytes{namespace=\"sobel\", container!=\"\"}) by (pod)",
           "legendFormat": "{{pod}}",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "CPU Utilizada por Nodo (%)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "targets": [
+        {
+          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+          "legendFormat": "Nodo: {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "percent"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Memoria Utilizada por Nodo (%)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "targets": [
+        {
+          "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))",
+          "legendFormat": "Nodo: {{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "percent"
+        }
+      }
     }
   ],
   "refresh": "5s",
-  "schemaVersion": 36,
-  "style": "dark",
-  "tags": ["sobel", "distribuido", "tp3", "hit4"],
-  "time": { "from": "now-15m", "to": "now" },
-  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m", "5m"] },
+  "schemaVersion": 38,
+  "tags": [
+    "sobel",
+    "cerberus",
+    "hit4",
+    "distribuido"
+  ],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m"
+    ]
+  },
   "timezone": "browser",
-  "title": "Sobel Distribuido — Observabilidad y Métricas (Hit #4)",
+  "title": "Sobel Distribuido \u2014 Observabilidad y M\u00e9tricas (Hit #4)",
   "uid": "sobel-hit4-dashboard",
-  "version": 1
+  "version": 2
 }

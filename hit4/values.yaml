@@ -67,7 +67,10 @@ prometheus:
 # ------------------------------------------------------------------------------
 grafana:
   enabled: true
-  adminPassword: "admin"
+  admin:
+    existingSecret: "grafana-admin-credentials"
+    userKey: "admin-user"
+    passwordKey: "admin-password"
   
   # Segmentación en el pool de infraestructura
   nodeSelector:
@@ -126,7 +129,7 @@ nodeExporter:
 # ------------------------------------------------------------------------------
 # 5. Kube-State-Metrics (Métricas de Pods, Deployments y Estado del Clúster)
 # ------------------------------------------------------------------------------
-kubeStateMetrics:
+kube-state-metrics:
   enabled: true
   nodeSelector:
     sobel/infra: "true"

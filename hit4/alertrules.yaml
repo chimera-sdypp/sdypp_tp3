@@ -15,7 +15,7 @@ spec:
         # 1. Alerta: Cola de RabbitMQ por encima del umbral de saturación
         # ----------------------------------------------------------------------
         - alert: SobelColaSaturada
-          expr: rabbitmq_queue_messages{queue=~"sobel\\..*"} > 50 or sobel_tareas_en_cola > 50
+          expr: rabbitmq_queue_messages{queue=~"sobel\\..*"} > 50 or max(sobel_tareas_en_cola) by (cola) > 50
           for: 1m
           labels:
             severity: warning

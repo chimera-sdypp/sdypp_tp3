@@ -10,36 +10,36 @@ Siguiendo las decisiones del proyecto, todo el stack de observabilidad corre en 
 
 ```mermaid
 flowchart TD
-    subgraph apps_pool [Grupo: sobel/apps=true]
-        B[Backend :8080]
-        S[Split :8080]
-        W[Workers :8080]
-        J[Joiner :8080]
-        R[Reasignador :8080]
+    subgraph apps_pool ["Grupo: sobel/apps=true"]
+        B["Backend (:8080)"]
+        S["Split (:8080)"]
+        W["Workers (:8080)"]
+        J["Joiner (:8080)"]
+        R["Reasignador (:8080)"]
     end
 
-    subgraph infra_pool [Grupo: sobel/infra=true]
-        RMQ[(RabbitMQ :15692)]
-        RD[(Redis :6379)]
+    subgraph infra_pool ["Grupo: sobel/infra=true"]
+        RMQ[("RabbitMQ (:15692)")]
+        RD[("Redis (:6379)")]
         
-        SM_APP[ServiceMonitor: sobel-services-metrics]
-        SM_RMQ[ServiceMonitor: rabbitmq-metrics]
+        SM_APP["ServiceMonitor: sobel-services-metrics"]
+        SM_RMQ["ServiceMonitor: rabbitmq-metrics"]
         
-        PROM[Prometheus Server]
-        AM[Alertmanager]
-        GRAF[Grafana Dashboard]
+        PROM["Prometheus Server"]
+        AM["Alertmanager"]
+        GRAF["Grafana Dashboard"]
     end
 
-    SM_APP -->|Scrape cada 10s /metrics| B & S & W & J & R
-    SM_RMQ -->|Scrape cada 10s /metrics/per-object| RMQ
+    SM_APP -->|"Scrape cada 10s /metrics"| B & S & W & J & R
+    SM_RMQ -->|"Scrape cada 10s /metrics/per-object"| RMQ
     
-    PROM -->|Recolecta datos| SM_APP & SM_RMQ
-    PROM -->|Evalúa reglas cada 10s| AM
-    GRAF -->|Consulta PromQL| PROM
+    PROM -->|"Recolecta datos"| SM_APP & SM_RMQ
+    PROM -->|"Evalúa reglas cada 10s"| AM
+    GRAF -->|"Consulta PromQL"| PROM
 ```
 
 * **Aislamiento de Carga:** El scraping y procesamiento de métricas no consume memoria ni ciclos de CPU en los nodos donde se realiza el procesamiento intensivo de imágenes (`sobel/apps=true`).
-* **En k3s local:** Para que un único nodo corra ambos grupos sin quedar en `Pending`, se aplican ambas etiquetas:
+* **En k3s local:** Para que un único nodo corra ambos grupos sin quedar en `Pending`, se aplican ambas etiquetas simultáneamente:
   ```bash
   kubectl label nodes $(kubectl get nodes -o jsonpath='{.items[0].metadata.name}') sobel/infra=true sobel/apps=true --overwrite
   ```
@@ -52,7 +52,7 @@ flowchart TD
 Recolectadas a través del plugin oficial `rabbitmq_prometheus` (puerto `15692`):
 * **Mensajes en Cola:**
   ```promql
-  rabbitmq_queue_messages{queue=~"sobel.*"}
+  rabbitmq_queue_messages{queue=~"sobel.*"} or max(sobel_tareas_en_cola) by (cola)
   ```
 * **Throughput de Publicación vs. Consumo:**
   ```promql
@@ -61,72 +61,81 @@ Recolectadas a través del plugin oficial `rabbitmq_prometheus` (puerto `15692`)
   ```
 * **Cola de Mensajes Muertos (DLQ):**
   ```promql
-  rabbitmq_queue_messages{queue="sobel.dlq"}
   rabbitmq_queue_messages{queue="sobel.dlq.agotados"}
   ```
 
-### 2.2 Métricas de Negocio (Microservicios en `/metrics`)
-Expuestas en el puerto `8080` de cada microservicio según el contrato del Hit #3:
-* **Tareas Procesadas por Operación y Resultado:**
+### 2.2 Métricas de Tareas y Errores de Microservicios
+* **Throughput de Tareas Procesadas:**
   ```promql
   sum(rate(sobel_tareas_procesadas_total[1m])) by (servicio, operacion, resultado)
   ```
-* **Latencia de Procesamiento por Tarea (p50 / p95 / p99):**
+* **Tasa de Errores por Servicio y Tipo:**
+  ```promql
+  sum(rate(sobel_errores_total[1m])) by (servicio, tipo)
+  ```
+
+### 2.3 Métricas de Latencias y Cumplimiento de SLOs
+* **Latencia de Tarea por Operación (p50, p95, p99):**
   ```promql
   histogram_quantile(0.95, sum(rate(sobel_tiempo_tarea_segundos_bucket[5m])) by (le, operacion))
   ```
-* **Duración Total de Jobs:**
+* **Tiempo Total de Job (SLO 2: p95 <= 30s para <=10MB):**
   ```promql
   histogram_quantile(0.95, sum(rate(sobel_tiempo_job_segundos_bucket[5m])) by (le))
   ```
-* **Tasa de Errores de la API (%):**
+* **Tasa de Errores HTTP 5xx (SLO 3: < 1%):**
   ```promql
-  (sum(rate(sobel_pedidos_total{codigo=~"5.."}[5m])) / (sum(rate(sobel_pedidos_total[5m])) > 0) * 100)
+  sum(rate(sobel_pedidos_total{codigo=~"5.."}[5m])) / sum(rate(sobel_pedidos_total[5m])) * 100
   ```
 
-### 2.3 Métricas de Infraestructura (Kubernetes)
-* **Consumo de CPU por Pod:**
+### 2.4 Consumo de Recursos en Kubernetes (Pods y Nodos)
+* **CPU Utilizada por Pod:**
   ```promql
   sum(rate(container_cpu_usage_seconds_total{namespace="sobel", container!=""}[5m])) by (pod)
   ```
-* **Consumo de Memoria por Pod:**
+* **Memoria Utilizada por Pod:**
   ```promql
   sum(container_memory_working_set_bytes{namespace="sobel", container!=""}) by (pod)
+  ```
+* **CPU Utilizada por Nodo (%):**
+  ```promql
+  100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100)
+  ```
+* **Memoria Utilizada por Nodo (%):**
+  ```promql
+  100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))
   ```
 
 ---
 
-## 3. Reglas de Alerta (`alertrules.yaml`)
+## 3. Catálogo de Alertas Automáticas (`alertrules.yaml`)
 
-Se configuran mediante el Custom Resource `PrometheusRule`:
+Definidas como un recurso `PrometheusRule`:
 
-1. **`SobelColaSaturada` (Warning):**
-   * *Condición:* `rabbitmq_queue_messages{queue=~"sobel\\..*"} > 50` durante más de 1 minuto.
-   * *Acción esperada:* Escalar réplicas de workers o investigar cuellos de botella.
-2. **`SobelWorkerCaido` (Critical):**
-   * *Condición:* `kube_deployment_status_replicas_available{namespace="sobel", deployment=~".*worker"} < 1` durante más de 30 segundos.
-   * *Acción esperada:* Alertar sobre falla fatal en pods de workers.
-3. **`SobelDLQAgotadosPresentes` (Warning):**
-   * *Condición:* `rabbitmq_queue_messages{queue="sobel.dlq.agotados"} > 0`.
-   * *Acción esperada:* Avisar a los administradores para que revisen los payloads y ejecuten `POST /admin/dlq/reprocesar`.
-4. **`SobelTasaErroresElevada` (Critical):**
-   * *Condición:* Errores HTTP 5xx superan el 5% del tráfico en 5 minutos.
+1. **`SobelColaSaturada` (Warning):**  
+   Se activa si `sobel.tareas.*` o cualquier cola acumula más de **50 mensajes** durante más de 1 minuto.
+2. **`SobelWorkerCaido` (Critical):**  
+   Se activa si algún worker (`sobel-worker`, `grises-worker`, `blur-worker`) tiene 0 réplicas disponibles o falla su probe durante más de 30 segundos.
+3. **`SobelDLQAgotadosPresentes` (Warning):**  
+   Se activa si hay mensajes en `sobel.dlq.agotados` requiriendo reprocesamiento manual.
+4. **`SobelTasaErroresElevada` (Critical):**  
+   Se activa si la tasa de errores `5xx` supera el **5%** en un intervalo de 2 minutos.
 
 ---
 
-## 4. Instrucciones de Despliegue
+## 4. Despliegue del Stack de Observabilidad
 
-### Paso 1: Ejecutar el Script de Instalación Automatizada
+Ejecutar el script automatizado:
 ```bash
-cd hit4
-./instalar_observabilidad.sh
+./hit4/instalar_observabilidad.sh
 ```
 
 El script se encarga de:
 1. Agregar y actualizar el repositorio de Helm `prometheus-community`.
-2. Desplegar `kube-prometheus-stack` en el namespace `monitoring` aplicando [`values.yaml`](values.yaml).
-3. Aplicar [`servicemonitor-rabbitmq.yaml`](servicemonitor-rabbitmq.yaml), [`servicemonitor-sobel.yaml`](servicemonitor-sobel.yaml) y [`alertrules.yaml`](alertrules.yaml) en el namespace `sobel`.
-4. Registrar el Dashboard de Grafana en el clúster vía ConfigMap con etiqueta `grafana_dashboard: "1"`.
+2. Generar el Secret `grafana-admin-credentials` de forma dinámica (sin contraseñas fijas).
+3. Desplegar `kube-prometheus-stack` en el namespace `monitoring` aplicando [`values.yaml`](values.yaml).
+4. Aplicar [`servicemonitor-rabbitmq.yaml`](servicemonitor-rabbitmq.yaml), [`servicemonitor-sobel.yaml`](servicemonitor-sobel.yaml) y [`alertrules.yaml`](alertrules.yaml) en el namespace `sobel`.
+5. Registrar el Dashboard de Grafana en el clúster vía ConfigMap con etiqueta `grafana_dashboard: "1"`.
 
 ---
 
@@ -138,15 +147,14 @@ kubectl port-forward svc/prometheus-grafana 3000:80 -n monitoring
 ```
 * **URL:** [http://localhost:3000](http://localhost:3000)
 * **Usuario:** `admin`
-* **Contraseña:** `admin` (configurada en `values.yaml`)
-* **Dashboard provisto:** *Sobel Distribuido — Observabilidad y Métricas (Hit #4)* disponible en la sección de Dashboards.
+* **Contraseña:** Generada dinámicamente en el despliegue (almacenada en `grafana-admin-credentials` y en `.env.secrets`).
+* **Dashboard:** *Sobel Distribuido — Observabilidad y Métricas (Hit #4)* (14 paneles).
 
 ### Prometheus & Alertmanager
-* **Prometheus Expression Browser & Alertas:**
-  ```bash
-  kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 -n monitoring
-  ```
-  Abrir [http://localhost:9090/alerts](http://localhost:9090/alerts) para inspeccionar las alertas activas.
+```bash
+kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 -n monitoring
+```
+* **URL:** [http://localhost:9090/alerts](http://localhost:9090/alerts) para inspeccionar las alertas activas.
 
 ---
 
@@ -172,7 +180,10 @@ Para cumplir con el requisito del enunciado (*"Dashboard con datos reales de un 
    ```bash
    kubectl scale deployment sobel-worker --replicas=0 -n sobel
    ```
-2. Enviar un lote de 60 fragmentos mediante el backend o script de carga (`hit3/carga/`).
+2. Enviar un lote de peticiones con el runner de carga (`hit3/carga/`):
+   ```bash
+   ./hit3/carga/correr_matriz.sh --celda 50 1 10 1mb
+   ```
 3. Verificar que la cola `sobel.tareas.*` supere los 50 mensajes:
    * Pasado 1 minuto, la alerta **`SobelColaSaturada`** cambiará a estado **FIRING**.
 4. Restaurar las réplicas del worker para vaciar la cola.
