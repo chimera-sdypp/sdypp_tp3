@@ -9,11 +9,8 @@ echo "  Hit #0 - Ejemplo 2: Event Bus / Pub-Sub (Fan-out)"
 echo "=========================================================="
 
 echo "[1/4] Levantando RabbitMQ..."
-docker compose up -d rabbitmq
-echo "Esperando que RabbitMQ esté listo..."
-until docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping >/dev/null 2>&1; do
-    sleep 1
-done
+# --wait bloquea hasta que el healthcheck del compose (rabbitmq-diagnostics ping) da healthy
+docker compose up -d --wait rabbitmq
 echo "RabbitMQ está saludable."
 
 echo ""

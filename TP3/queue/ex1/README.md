@@ -10,12 +10,12 @@ El patrón Punto a Punto garantiza que **cada mensaje enviado a la cola sea proc
 
 ```mermaid
 flowchart LR
-    P[PRODUCER\n(Envía 10 tareas)] -->|basic_publish| Q[(QUEUE: task_queue\nDurable)]
-    Q -->|Round-Robin\n(msg 1, 3, 5, 7, 9)| C1[CONSUMER 1\nWorker]
-    Q -->|Round-Robin\n(msg 2, 4, 6, 8, 10)| C2[CONSUMER 2\nWorker]
+    P["PRODUCER<br/>(Envía 10 tareas)"] -->|basic_publish| Q[("QUEUE: task_queue<br/>Durable")]
+    Q -->|"Round-Robin (msg 1, 3, 5, 7, 9)"| C1["CONSUMER 1<br/>Worker"]
+    Q -->|"Round-Robin (msg 2, 4, 6, 8, 10)"| C2["CONSUMER 2<br/>Worker"]
 
     subgraph Distribución Round-Robin
-        M1[msg1 \n -> C1] --- M2[msg2 \n -> C2] --- M3[msg3 \n -> C1] --- M4[msg4 \n -> C2] --- M5[msg5 \n -> C1]
+        M1["msg1 -> C1"] --- M2["msg2 -> C2"] --- M3["msg3 -> C1"] --- M4["msg4 -> C2"] --- M5["msg5 -> C1"]
     end
 ```
 
@@ -93,9 +93,10 @@ cd TP3/queue/ex1
 
 Los manifiestos en la carpeta `k8s/` permiten desplegar el ejemplo en cualquier clúster (K3s, Microk8s, Minikube, GKE, EKS):
 
-1. **Construir la imagen de la aplicación:**
+1. **Construir la imagen e importarla a k3s** (k3s usa containerd, no ve las imágenes locales de Docker):
    ```bash
    docker build -t sdypp/ex1-app:latest .
+   docker save sdypp/ex1-app:latest | sudo k3s ctr images import -
    ```
 
 2. **Desplegar RabbitMQ y el Service:**
