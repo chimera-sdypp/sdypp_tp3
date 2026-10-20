@@ -42,17 +42,19 @@ jobs:
         run: PYTHON=python bash tests/tolerancia.sh
 
   hit3:
-    name: Hit 3 — comun (conexión con backoff)
+    name: Hit 3 — comun y split
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: hit3/comun
+        working-directory: hit3
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
       - name: Instalar dependencias
-        run: pip install -r requirements-dev.txt
-      - name: Tests unitarios
-        run: python -m pytest -v
+        run: pip install -r comun/requirements-dev.txt -r split/requirements-dev.txt
+      - name: Tests de comun
+        run: python -m pytest -v comun
+      - name: Tests del split
+        run: python -m pytest -v split

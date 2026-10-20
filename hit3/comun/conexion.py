@@ -26,6 +26,7 @@ ERRORES_DE_CREDENCIALES = (
 )
 
 # Lo que devuelve el /health de cada servicio (contrato §12): {"rabbitmq": "ok", "redis": "caido"}.
+OK, CAIDO = "ok", "caido"
 estado = {}
 
 
@@ -37,11 +38,11 @@ def con_backoff(conectar, nombre, dormir=time.sleep, log=logging.getLogger("tp3.
     """
     espera = ESPERA_INICIAL
     reconexion = 0
-    estado[nombre] = "caido"
+    estado[nombre] = CAIDO
     while True:
         try:
             resultado = conectar()
-            estado[nombre] = "ok"
+            estado[nombre] = OK
             log.info("conectado a %s", nombre)
             return resultado
         except ERRORES_DE_CREDENCIALES as error:
@@ -73,9 +74,14 @@ def conectar_rabbitmq(url=None, log=logging.getLogger("tp3.comun")):
     return con_backoff(lambda: pika.BlockingConnection(parametros), "rabbitmq", log=log)
 
 
+def cliente_redis(url=None):
+    """Cliente de $REDIS_URL. No toca la red: redis-py conecta recién en el primer comando."""
+    return redis.Redis.from_url(url or variable_obligatoria("REDIS_URL"))
+
+
 def conectar_redis(url=None, log=logging.getLogger("tp3.comun")):
-    """Cliente de $REDIS_URL; el ping explícito es porque redis-py conecta recién en el primer comando."""
-    cliente = redis.Redis.from_url(url or variable_obligatoria("REDIS_URL"))
+    """Cliente de $REDIS_URL, esperando con backoff a que responda el ping."""
+    cliente = cliente_redis(url)
     con_backoff(cliente.ping, "redis", log=log)
     return cliente
 
