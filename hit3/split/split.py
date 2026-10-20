@@ -17,9 +17,10 @@ def ahora_en_ms():
     return int(time.time() * 1000)
 
 
-def fallar(redis, job, mensaje, ahora):
-    """Deja el job en `failed` y lo anota en `terminados` (los últimos 1000, para /stats)."""
-    redis.hset(job, mapping={"estado": "failed", "error": json.dumps({"tipo": "ARCHIVO_INVALIDO", "mensaje": mensaje})})
+def fallar_por_archivo_invalido(redis, job, mensaje, ahora):
+    """Deja el job en `failed` con error ARCHIVO_INVALIDO y lo anota en `terminados` (los últimos 1000)."""
+    error = {"tipo": "ARCHIVO_INVALIDO", "mensaje": mensaje}
+    redis.hset(job, mapping={"estado": "failed", "error": json.dumps(error)})
     redis.lpush("terminados", f"failed {ahora - int(redis.hget(job, 'creado'))}")
     redis.ltrim("terminados", 0, 999)
 
@@ -39,8 +40,9 @@ def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.sp
                 matriz = pixeles.leer_rgb(redis.get(f"{job}:entrada:{archivo}"))
             except ValueError:
                 # Lo ya escrito vence por TTL; no se publica nada, así `failed` queda final (contrato §3).
-                fallar(redis, job, f"el archivo {archivo} no se pudo decodificar", ahora_ms())
-                log.warning("job %s: el archivo %d no se pudo decodificar, queda en failed", job_id, archivo)
+                mensaje = f"el archivo {archivo} no se pudo decodificar"
+                fallar_por_archivo_invalido(redis, job, mensaje, ahora_ms())
+                log.warning("job %s: %s, queda en failed", job_id, mensaje)
                 return
             fragmentos = pixeles.dividir(matriz, partes, filas_de_borde)
             geometria = {"total": len(fragmentos)}
@@ -55,7 +57,8 @@ def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.sp
         for tarea in tareas:
             colas.publicar(canal, cola, {**tarea, "encolado": ahora_ms()})
         t_split_ms = ahora_ms() - inicio
-        redis.hset(job, mapping={"estado": "processing", "fragmentos_total": len(tareas), "t_split_ms": t_split_ms})
+        redis.hset(job, mapping={"estado": "processing", "fragmentos_total": len(tareas),
+                                 "t_split_ms": t_split_ms})
         log.info("job %s: %d fragmentos a %s en %d ms", job_id, len(tareas), cola, t_split_ms)
 
     return procesar

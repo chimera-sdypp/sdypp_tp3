@@ -192,3 +192,15 @@ def test_terminados_guarda_solo_los_ultimos_1000(redis):
     assert redis.llen("terminados") == 1000
     assert redis.lindex("terminados", 0) == b"failed 1500"
     assert redis.lindex("terminados", -1) == b"done 998"
+
+
+def test_un_archivo_que_pasa_el_doble_del_limite_de_pillow_tambien_deja_el_job_en_failed(redis, monkeypatch):
+    # Con el límite real (100 MP) haría falta una imagen de más de 200 MP; bajarlo da el mismo error con 40×40.
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)
+    cargar_job(redis, "j1", [png(imagen_rgb(40, 40))])
+    canal = CanalQuePublica()
+
+    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(canal, b'{"job_id": "j1"}')
+
+    assert redis.hget("job:j1", "estado") == b"failed"
+    assert canal.eventos == []

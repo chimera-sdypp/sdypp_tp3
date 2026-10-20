@@ -18,7 +18,9 @@ def leer_rgb(datos):
     try:
         with Image.open(io.BytesIO(datos)) as archivo:
             return np.asarray(archivo.convert("RGB"))
-    except OSError:  # incluye UnidentifiedImageError y "image file is truncated"
+    # OSError incluye UnidentifiedImageError e "image file is truncated"; DecompressionBombError salta
+    # por encima del doble de MAX_IMAGE_PIXELS (el backend ya rechaza más de 100 MP, pero por las dudas).
+    except (OSError, Image.DecompressionBombError):
         raise ValueError("no se pudo decodificar") from None
 
 
