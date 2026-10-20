@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ex1-consumer
+  labels:
+    app: ex1-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ex1-consumer
+  template:
+    metadata:
+      labels:
+        app: ex1-consumer
+    spec:
+      containers:
+        - name: consumer
+          image: sdypp/ex1-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "consumer.py"]
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-service"
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_USER
+              value: "guest"
+            - name: RABBITMQ_PASS
+              value: "guest"
+            - name: QUEUE_NAME
+              value: "task_queue"
+            - name: PROCESSING_TIME
+              value: "0.5"
+            - name: CONSUMER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

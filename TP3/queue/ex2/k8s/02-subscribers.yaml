@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ex2-subscribers
+  labels:
+    app: ex2-subscribers
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ex2-subscribers
+  template:
+    metadata:
+      labels:
+        app: ex2-subscribers
+    spec:
+      containers:
+        - name: subscriber
+          image: sdypp/ex2-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "subscriber.py"]
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-ex2-service"
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_USER
+              value: "guest"
+            - name: RABBITMQ_PASS
+              value: "guest"
+            - name: EXCHANGE_NAME
+              value: "blockchain_events"
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
