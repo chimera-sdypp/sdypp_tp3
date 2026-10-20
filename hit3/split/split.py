@@ -114,9 +114,16 @@ def entero_de_entorno(nombre, por_defecto, minimo):
 
 def main():
     log, _ = registro.configurar("split")
-    # Como PID 1 del contenedor, sin handler el SIGTERM se ignora y k8s espera el período de gracia para matarlo.
-    # Salir corta el job en curso sin ack: RabbitMQ lo reentrega y el split tolera el redelivery.
-    signal.signal(signal.SIGTERM, lambda senal, _frame: sys.exit(0))
+
+    def apagar(senal, _frame):
+        # Como PID 1 del contenedor, sin handler el SIGTERM se ignora y k8s espera el período de gracia
+        # para matarlo. Salir corta el job en curso sin ack y RabbitMQ lo reentrega. Si la señal llega
+        # mientras se publican las tareas, el redelivery repite las ya publicadas (contrato §9: no rompe nada).
+        log.info("%s: el split termina; si había un job en curso, RabbitMQ lo reentrega",
+                 signal.Signals(senal).name)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, apagar)
     partes = entero_de_entorno("SOBEL_PARTES", 4, 1)
     ttl = entero_de_entorno("SOBEL_TTL", TTL_POR_DEFECTO, 1)
     puerto = entero_de_entorno("SOBEL_PUERTO", 8080, 1)

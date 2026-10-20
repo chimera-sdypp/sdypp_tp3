@@ -4,4 +4,4 @@
 **/*.pyc
 **/.pytest_cache/
 **/.env
-contrato.md
+**/.venv/
