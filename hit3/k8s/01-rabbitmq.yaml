@@ -18,7 +18,7 @@ metadata:
   labels:
     app.kubernetes.io/name: rabbitmq
     app.kubernetes.io/component: message-broker
-    pool: infra
+    sobel/infra: "true"
 spec:
   type: ClusterIP
   selector:
@@ -42,7 +42,7 @@ metadata:
   labels:
     app.kubernetes.io/name: rabbitmq
     app.kubernetes.io/component: message-broker
-    pool: infra
+    sobel/infra: "true"
 spec:
   serviceName: rabbitmq
   replicas: 1
@@ -54,14 +54,14 @@ spec:
       labels:
         app.kubernetes.io/name: rabbitmq
         app.kubernetes.io/component: message-broker
-        pool: infra
+        sobel/infra: "true"
     spec:
       nodeSelector:
-        pool: infra
+        sobel/infra: "true"
       tolerations:
-        - key: "pool"
+        - key: "sobel/infra"
           operator: "Equal"
-          value: "infra"
+          value: "true"
           effect: "NoSchedule"
       containers:
         - name: rabbitmq
@@ -121,4 +121,4 @@ spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            storage: 2Gi
+            storage: 5Gi

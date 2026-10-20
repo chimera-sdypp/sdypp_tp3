@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: split
     app.kubernetes.io/component: image-splitter
-    pool: apps
+    sobel/apps: "true"
 spec:
   type: ClusterIP
   selector:
@@ -24,7 +24,7 @@ metadata:
   labels:
     app.kubernetes.io/name: split
     app.kubernetes.io/component: image-splitter
-    pool: apps
+    sobel/apps: "true"
 spec:
   replicas: 1
   selector:
@@ -35,14 +35,14 @@ spec:
       labels:
         app.kubernetes.io/name: split
         app.kubernetes.io/component: image-splitter
-        pool: apps
+        sobel/apps: "true"
     spec:
       nodeSelector:
-        pool: apps
+        sobel/apps: "true"
       tolerations:
-        - key: "pool"
+        - key: "sobel/apps"
           operator: "Equal"
-          value: "apps"
+          value: "true"
           effect: "NoSchedule"
       imagePullSecrets:
         - name: ghcr-secret
@@ -72,11 +72,11 @@ spec:
               value: "3"
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 200m
+              memory: 256Mi
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 1000m
+              memory: 2Gi
           readinessProbe:
             httpGet:
               path: /health
@@ -85,8 +85,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10

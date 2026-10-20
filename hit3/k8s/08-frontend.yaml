@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: frontend
     app.kubernetes.io/component: web-ui
-    pool: apps
+    sobel/apps: "true"
 spec:
   type: ClusterIP
   selector:
@@ -24,7 +24,7 @@ metadata:
   labels:
     app.kubernetes.io/name: frontend
     app.kubernetes.io/component: web-ui
-    pool: apps
+    sobel/apps: "true"
 spec:
   replicas: 1
   selector:
@@ -35,14 +35,14 @@ spec:
       labels:
         app.kubernetes.io/name: frontend
         app.kubernetes.io/component: web-ui
-        pool: apps
+        sobel/apps: "true"
     spec:
       nodeSelector:
-        pool: apps
+        sobel/apps: "true"
       tolerations:
-        - key: "pool"
+        - key: "sobel/apps"
           operator: "Equal"
-          value: "apps"
+          value: "true"
           effect: "NoSchedule"
       imagePullSecrets:
         - name: ghcr-secret
@@ -83,8 +83,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
-            httpGet:
-              path: /health
+            tcpSocket:
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10

@@ -8,18 +8,22 @@ Este directorio contiene los manifiestos de Kubernetes para desplegar la arquite
 
 La arquitectura divide los pods en dos grupos de nodos mediante `nodeSelector` y `tolerations`:
 
-1. **`pool=infra` (Infraestructura persistente y observabilidad):**
-   - **RabbitMQ StatefulSet:** broker de mensajería con volumen persistente (`2Gi`) montado en `/var/lib/rabbitmq` e imagen `rabbitmq:4-management`. Expone AMQP (`5672`), Management (`15672`) y el plugin `rabbitmq_prometheus` (`15692`).
-   - **Redis StatefulSet:** almacén en memoria con persistencia en disco (`appendonly yes`, PVC `2Gi`) montado en `/data` e imagen `redis:7-alpine`. Expone el puerto `6379`.
-   - **Observabilidad (Hit #4):** stack de Prometheus y Grafana (desplegado vía Helm en este mismo pool).
+1. **`sobel/infra=true` (Infraestructura persistente y observabilidad):**
+   - **RabbitMQ StatefulSet:** broker de mensajería con volumen persistente (`5Gi`) montado en `/var/lib/rabbitmq` e imagen `rabbitmq:4-management`. Expone AMQP (`5672`), Management (`15672`) y el plugin `rabbitmq_prometheus` (`15692`).
+   - **Redis StatefulSet:** almacén en memoria con persistencia en disco (`appendonly yes`, PVC `10Gi`), contraseña obligatoria (`requirepass`) y límites aumentados (`2Gi` RAM). Expone el puerto `6379`.
+   - **Observabilidad (Hit #4):** stack de Prometheus, Alertmanager y Grafana (desplegado vía Helm en este mismo pool).
 
-2. **`pool=apps` (Microservicios sin estado y procesamiento):**
-   - **Backend Deployment:** 3 réplicas sin estado del API Gateway HTTP (puerto `8080`).
-   - **Split Deployment:** divide imágenes entrantes en fragmentos con filas de borde (puerto `8080`).
-   - **Workers Deployments:** pods por operación (`sobel-worker`, `grises-worker`) que consumen fragmentos y computan transformaciones (puerto `8080`).
-   - **Joiner Deployment:** 2 réplicas que compiten en `sobel.joiner`, coordinan la unión atómica en Redis y publican resultados (puerto `8080`).
-   - **Reasignador Deployment:** consume la cola de fallos `sobel.dlq`, evalúa reintentos y deriva a `sobel.dlq.agotados` tras superar el umbral (puerto `8080`).
+2. **`sobel/apps=true` (Microservicios y procesamiento):**
+   - **Backend Deployment:** 3 réplicas del API Gateway HTTP (`2Gi` RAM, puerto `8080`), validación previa de pedidos y métricas.
+   - **Split Deployment:** divide imágenes entrantes en fragmentos con filas de borde (`2Gi` RAM para imágenes de hasta 100 megapíxeles).
+   - **Workers Deployments:** pods especializados por operación (`sobel-worker`, `grises-worker`, `blur-worker`) con `1Gi` RAM y Services headless para scraping de Prometheus.
+   - **Joiner Deployment:** 2 réplicas concurrentes (`2Gi` RAM) que consumen de `sobel.joiner`, coordinan la unión atómica en Redis y publican resultados.
+   - **Reasignador Deployment:** consume la cola de fallos `sobel.dlq`, evalúa reintentos y deriva a `sobel.dlq.agotados` tras superar el umbral (`SOBEL_REINTENTOS_MAX: 3`).
    - **Frontend Deployment:** interfaz web y dashboard de progreso en vivo (puerto `8080`).
+
+> **Diseño de Probes:**
+> * **`readinessProbe`:** `httpGet: /health` en el puerto `8080`. Indica si el servicio está listo para recibir tráfico (depende de que RabbitMQ y Redis estén conectados).
+> * **`livenessProbe`:** `tcpSocket: 8080`. Comprueba únicamente si el proceso del contenedor está vivo. Esto evita cascadas de reinicios destructivos si RabbitMQ o Redis demoran en arrancar o están reconectando con backoff.
 
 ---
 
@@ -27,23 +31,23 @@ La arquitectura divide los pods en dos grupos de nodos mediante `nodeSelector` y
 
 ### Paso 0: Etiquetar los Nodos
 
-En un clúster k3s local de nodo único (o máquina de pruebas), etiquetar el nodo para que acepte tanto pods de infraestructura como de aplicaciones:
+En un clúster k3s local de nodo único (o máquina de desarrollo), etiquetar el nodo con ambas etiquetas simultáneamente:
 
 ```bash
 # Obtener el nombre del nodo
 NODE_NAME=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
 
-# Aplicar las etiquetas de los pools
-kubectl label nodes "$NODE_NAME" pool=infra pool=apps --overwrite
+# Aplicar las etiquetas de los pools (dos claves independientes)
+kubectl label nodes "$NODE_NAME" sobel/infra=true sobel/apps=true --overwrite
 ```
 
-> **En clústeres multi-nodo o nube:** Cada nodo se etiqueta según su propósito (ej. nodos de cómputo con `pool=apps` y nodos de soporte con `pool=infra`).
+> **En clústeres multi-nodo o nube (GKE / EKS):** Cada node pool se etiqueta de forma independiente (`sobel/infra=true` para el pool de infraestructura y `sobel/apps=true` para el pool de cómputo).
 
 ---
 
 ### Paso 1: Generar los Secretos Locales
 
-Los secretos **nunca se versionan en Git** (cumpliendo R1 y auditoría de gitleaks). Ejecute el script provisto para crearlos en el clúster:
+Los secretos **nunca se versionan en Git** (cumpliendo R1 y auditoría de gitleaks). Ejecute el script provisto para crearlos en el clúster con credenciales dinámicas de alta entropía:
 
 ```bash
 cd hit3/k8s
@@ -51,65 +55,49 @@ cd hit3/k8s
 ```
 
 El script genera automáticamente el Secret `sobel-secretos` en el namespace `sobel` con:
-- `RABBITMQ_URL` (`amqp://guest:guest@rabbitmq.sobel.svc.cluster.local:5672/`)
-- `REDIS_URL` (`redis://redis.sobel.svc.cluster.local:6379/0`)
-- `SOBEL_SECRETO` (clave para tokens JWT HS256)
-- Credenciales de acceso por defecto.
+- `RABBITMQ_USER` y `RABBITMQ_PASS` generados aleatoriamente (evitando defaults inseguros).
+- `RABBITMQ_URL` (`amqp://<user>:<pass>@rabbitmq.sobel.svc.cluster.local:5672/`).
+- `REDIS_PASS` generado aleatoriamente y `REDIS_URL` (`redis://:<pass>@redis.sobel.svc.cluster.local:6379/0`).
+- `SOBEL_SECRETO` (clave criptográfica de 32 caracteres para tokens JWT HS256).
+- Copia local de respaldo en `.env.secrets` (con permisos `600`, ignorado por `.gitignore`).
 
 *(Opcional)* Si desea descargar imágenes privadas de GitHub Container Registry (`ghcr.io`), defina las variables antes de correr el script:
 ```bash
-GHCR_USER="mi-usuario" GHCR_PAT="ghp_xxx" ./crear_secretos.sh
+GHCR_USER="tu-usuario" GHCR_PAT="tu-token-ghcr" ./crear_secretos.sh
 ```
 
 ---
 
-### Paso 2: Desplegar los Manifiestos
+### Paso 2: Despliegue Atómico con Kustomize
 
-Aplique la infraestructura y todos los microservicios con Kustomize o kubectl:
+El archivo `kustomization.yaml` permite aplicar todo el catálogo en orden correcto y de manera atómica:
 
 ```bash
-# Opción A: con Kustomize (recomendada)
 kubectl apply -k hit3/k8s/
+```
 
-# Opción B: aplicando todos los manifiestos
-kubectl apply -f hit3/k8s/
+O verificar previamente el YAML renderizado:
+```bash
+kubectl kustomize hit3/k8s/
 ```
 
 ---
 
-### Paso 3: Verificación del Despliegue
+### Paso 3: Verificar el Estado de los Componentes
 
-1. **Verificar el estado de los Pods y StatefulSets:**
+1. **Verificar que los pods estén corriendo:**
    ```bash
-   kubectl get pods,statefulsets,services -n sobel -o wide
+   kubectl get pods -n sobel -o wide
    ```
 
-2. **Verificar los Volúmenes Persistentes (PVCs):**
+2. **Verificar los StatefulSets y sus PVCs persistentes:**
    ```bash
-   kubectl get pvc -n sobel
-   ```
-   Debe mostrar `rabbitmq-data-rabbitmq-0` y `redis-data-redis-0` en estado `Bound`.
-
-3. **Verificar el Health Check Global:**
-   ```bash
-   kubectl port-forward svc/backend 8080:8080 -n sobel
-   curl http://localhost:8080/health
-   ```
-   Respuesta esperada:
-   ```json
-   {"codigo": 200, "contenido": {"backend": "ok", "redis": "ok", "rabbitmq": "ok", ...}}
+   kubectl get statefulset,pvc -n sobel
    ```
 
-4. **Acceso a la interfaz de RabbitMQ Management:**
+3. **Verificar los Services e Ingress:**
    ```bash
-   kubectl port-forward svc/rabbitmq 15672:15672 -n sobel
-   ```
-   Abrir en el navegador: [http://localhost:15672](http://localhost:15672) (credenciales `guest`/`guest`).
-
-5. **Acceso a Métricas de RabbitMQ (Prometheus):**
-   ```bash
-   kubectl port-forward svc/rabbitmq 15692:15692 -n sobel
-   curl http://localhost:15692/metrics
+   kubectl get svc,ingress -n sobel
    ```
 
 ---
@@ -118,15 +106,15 @@ kubectl apply -f hit3/k8s/
 
 | Archivo | Tipo de Recurso | Descripción |
 |---|---|---|
-| `00-namespace.yaml` | `Namespace` | Namespace aislado `sobel`. |
-| `crear_secretos.sh` | Bash Script | Generador seguro de `sobel-secretos` y `ghcr-secret`. |
-| `01-rabbitmq.yaml` | `ConfigMap`, `Service`, `StatefulSet` | RabbitMQ 4 con plugin Prometheus y PVC de 2Gi en `pool=infra`. |
-| `02-redis.yaml` | `Service`, `StatefulSet` | Redis 7 con persistencia AOF y PVC de 2Gi en `pool=infra`. |
-| `03-backend.yaml` | `Service`, `Deployment` | 3 réplicas del API Gateway HTTP en `pool=apps`. |
-| `04-split.yaml` | `Service`, `Deployment` | Servicio de división de imágenes en fragmentos. |
-| `05-workers.yaml` | `Deployment` (x2) | Workers especializados por operación (`sobel`, `grises`). |
-| `06-joiner.yaml` | `Service`, `Deployment` | 2 réplicas para el reensamblado concurrente de imágenes. |
-| `07-reasignador.yaml` | `Service`, `Deployment` | Consumidor de `sobel.dlq` y reintento resiliente. |
-| `08-frontend.yaml` | `Service`, `Deployment` | Web UI y dashboard de progreso. |
-| `09-ingress.yaml` | `Ingress` | Enrutamiento perimetral para API (`/jobs`, `/admin`, `/health`) y Web (`/`). |
-| `kustomization.yaml` | `Kustomization` | Agrupador para despliegues atómicos. |
+| `00-namespace.yaml` | `Namespace` | Namespace aislado `sobel` |
+| `01-rabbitmq.yaml` | `ConfigMap`, `Service`, `StatefulSet` | RabbitMQ 4 con plugin Prometheus y PVC de 5Gi en `sobel/infra=true` |
+| `02-redis.yaml` | `Service`, `StatefulSet` | Redis 7 con requirepass, persistencia AOF y PVC de 10Gi en `sobel/infra=true` |
+| `03-backend.yaml` | `Service`, `Deployment` | 3 réplicas del backend API Gateway (`2Gi` RAM) en `sobel/apps=true` |
+| `04-split.yaml` | `Service`, `Deployment` | Particionado de imágenes (`2Gi` RAM) en `sobel/apps=true` |
+| `05-workers.yaml` | `Service`, `Deployment` | Workers (`sobel`, `grises`, `blur`) con Services headless en `sobel/apps=true` |
+| `06-joiner.yaml` | `Service`, `Deployment` | 2 réplicas concurrentes del ensamblador (`2Gi` RAM) en `sobel/apps=true` |
+| `07-reasignador.yaml` | `Service`, `Deployment` | Manejador de fallos y reenvíos desde DLQ en `sobel/apps=true` |
+| `08-frontend.yaml` | `Service`, `Deployment` | Interfaz web de usuario y monitoreo en `sobel/apps=true` |
+| `09-ingress.yaml` | `Ingress` | Enrutamiento HTTP hacia backend (`/jobs`, `/admin`, `/stats`, `/health`) y frontend (`/`) |
+| `crear_secretos.sh` | Bash Script | Generación segura de secrets con credenciales dinámicas sin defaults fijos |
+| `kustomization.yaml` | Kustomize | Índice declarativo para despliegue atómico |

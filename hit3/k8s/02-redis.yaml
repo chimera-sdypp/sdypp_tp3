@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/name: redis
     app.kubernetes.io/component: in-memory-datastore
-    pool: infra
+    sobel/infra: "true"
 spec:
   type: ClusterIP
   selector:
@@ -24,7 +24,7 @@ metadata:
   labels:
     app.kubernetes.io/name: redis
     app.kubernetes.io/component: in-memory-datastore
-    pool: infra
+    sobel/infra: "true"
 spec:
   serviceName: redis
   replicas: 1
@@ -36,23 +36,29 @@ spec:
       labels:
         app.kubernetes.io/name: redis
         app.kubernetes.io/component: in-memory-datastore
-        pool: infra
+        sobel/infra: "true"
     spec:
       nodeSelector:
-        pool: infra
+        sobel/infra: "true"
       tolerations:
-        - key: "pool"
+        - key: "sobel/infra"
           operator: "Equal"
-          value: "infra"
+          value: "true"
           effect: "NoSchedule"
       containers:
         - name: redis
           image: redis:7-alpine
           imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: sobel-secretos
+                  key: REDIS_PASS
           command:
-            - redis-server
-            - --appendonly
-            - "yes"
+            - sh
+            - -c
+            - exec redis-server --appendonly yes --requirepass "$REDIS_PASS"
           ports:
             - name: redis
               containerPort: 6379
@@ -61,24 +67,26 @@ spec:
               mountPath: /data
           resources:
             requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
+              cpu: 200m
               memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 2Gi
           readinessProbe:
             exec:
               command:
-                - redis-cli
-                - ping
+                - sh
+                - -c
+                - redis-cli --no-auth-warning -a "$REDIS_PASS" ping
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
             exec:
               command:
-                - redis-cli
-                - ping
+                - sh
+                - -c
+                - redis-cli --no-auth-warning -a "$REDIS_PASS" ping
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3
@@ -89,4 +97,4 @@ spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            storage: 2Gi
+            storage: 10Gi
