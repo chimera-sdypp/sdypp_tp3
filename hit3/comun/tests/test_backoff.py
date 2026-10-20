@@ -72,11 +72,11 @@ def test_credenciales_invalidas_cortan_sin_reintentar(error):
     assert esperas == []
 
 
-def test_estado_muestra_conectando_mientras_espera_y_ok_al_conectar():
+def test_estado_muestra_caido_mientras_espera_y_ok_al_conectar():
     visto_mientras_espera = []
 
     conexion.con_backoff(conectar_que_falla(2), "redis",
                          dormir=lambda s: visto_mientras_espera.append(conexion.estado["redis"]))
 
-    assert visto_mientras_espera == ["conectando", "conectando"]
+    assert visto_mientras_espera == ["caido", "caido"]
     assert conexion.estado["redis"] == "ok"

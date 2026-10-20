@@ -159,3 +159,17 @@ def test_stop_consuming_termina_sin_reconectar():
     conexion.consumir("sobel.split", lambda c, cuerpo: None, conectar=lambda: next(conexiones))
 
     assert canal.acks == [1]
+
+
+def test_consume_la_cola_que_devuelve_al_conectar_y_la_renueva_al_reconectar():
+    antes = CanalFalso([], al_vaciarse=lambda: pika.exceptions.StreamLostError("socket cerrado"))
+    despues = CanalFalso([])
+    conexiones = iter([ConexionFalsa(antes), ConexionFalsa(despues)])
+    nombres = iter(["amq.gen-primera", "amq.gen-segunda"])
+
+    with pytest.raises(Fin):
+        conexion.consumir(None, lambda c, cuerpo: None, al_conectar=lambda c: next(nombres),
+                          conectar=lambda: next(conexiones))
+
+    assert antes.cola == "amq.gen-primera"
+    assert despues.cola == "amq.gen-segunda"

@@ -25,7 +25,7 @@ ERRORES_DE_CREDENCIALES = (
     redis.exceptions.AuthenticationError,
 )
 
-# Lo que devuelve el /health de cada servicio: {"rabbitmq": "ok", "redis": "conectando"}.
+# Lo que devuelve el /health de cada servicio (contrato §12): {"rabbitmq": "ok", "redis": "caido"}.
 estado = {}
 
 
@@ -37,7 +37,7 @@ def con_backoff(conectar, nombre, dormir=time.sleep, log=logging.getLogger("tp3.
     """
     espera = ESPERA_INICIAL
     reconexion = 0
-    estado[nombre] = "conectando"
+    estado[nombre] = "caido"
     while True:
         try:
             resultado = conectar()
@@ -56,9 +56,17 @@ def con_backoff(conectar, nombre, dormir=time.sleep, log=logging.getLogger("tp3.
             espera = min(espera * 2, ESPERA_MAXIMA)
 
 
+def variable_obligatoria(nombre):
+    """Sin default a propósito (contrato §12): si falta el Secret, mejor fallar que reconectar a localhost."""
+    try:
+        return os.environ[nombre]
+    except KeyError:
+        raise RuntimeError(f"falta la variable de entorno {nombre}") from None
+
+
 def conectar_rabbitmq(url=None, log=logging.getLogger("tp3.comun")):
     """Conexión bloqueante a $RABBITMQ_URL, esperando con backoff a que el broker responda."""
-    url = url or os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/%2F")
+    url = url or variable_obligatoria("RABBITMQ_URL")
     parametros = pika.URLParameters(url)
     if "heartbeat=" not in url:
         parametros.heartbeat = 600
@@ -67,7 +75,7 @@ def conectar_rabbitmq(url=None, log=logging.getLogger("tp3.comun")):
 
 def conectar_redis(url=None, log=logging.getLogger("tp3.comun")):
     """Cliente de $REDIS_URL; el ping explícito es porque redis-py conecta recién en el primer comando."""
-    cliente = redis.Redis.from_url(url or os.environ.get("REDIS_URL", "redis://localhost:6379/0"))
+    cliente = redis.Redis.from_url(url or variable_obligatoria("REDIS_URL"))
     con_backoff(cliente.ping, "redis", log=log)
     return cliente
 
@@ -78,6 +86,8 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
 
     Si el callback termina bien hace ack; si lanza una excepción, nack sin reencolar (va a la DLQ).
     El canal publica con confirmación del broker, y `al_conectar(canal)` declara la topología.
+    Si `al_conectar` devuelve un nombre de cola, se consume esa: sirve para las colas exclusivas que
+    RabbitMQ nombra en cada conexión (el frontend, contrato §9). En ese caso `cola` puede ser None.
     Si se cae RabbitMQ, reconecta con backoff; los mensajes sin ack los reencola el broker.
     Si se cae Redis, el mensaje no tiene la culpa: vuelve a la cola y se espera a que Redis responda.
     """
@@ -87,7 +97,7 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
         try:
             callback(canal, cuerpo)
         except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as error:
-            log.warning("se cayó redis procesando un mensaje de %s (%s), lo reencolo", cola, error)
+            log.warning("se cayó redis procesando un mensaje de %s (%s), lo reencolo", consumida, error)
             canal.basic_nack(delivery_tag=metodo.delivery_tag, requeue=True)
             if cliente_redis is not None:
                 con_backoff(cliente_redis.ping, "redis", dormir=dormir, log=log)
@@ -95,7 +105,7 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
         except pika.exceptions.AMQPConnectionError:
             raise  # sin canal no hay nack: lo reencola el broker y se reconecta afuera
         except Exception:
-            log.exception("falló un mensaje de %s, va a la DLQ", cola)
+            log.exception("falló un mensaje de %s, va a la DLQ", consumida)
             canal.basic_nack(delivery_tag=metodo.delivery_tag, requeue=False)
             return
         canal.basic_ack(delivery_tag=metodo.delivery_tag)
@@ -104,11 +114,10 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
         canal = conectar().channel()
         canal.confirm_delivery()
         canal.basic_qos(prefetch_count=prefetch)
-        if al_conectar:
-            al_conectar(canal)
-        canal.basic_consume(cola, on_message_callback=manejar)
+        consumida = (al_conectar(canal) if al_conectar else None) or cola
+        canal.basic_consume(consumida, on_message_callback=manejar)
         try:
             canal.start_consuming()
             return  # alguien llamó a stop_consuming: apagado ordenado
         except pika.exceptions.AMQPConnectionError as error:
-            log.warning("se cortó la conexión con rabbitmq consumiendo %s (%s), reconecto", cola, error)
+            log.warning("se cortó la conexión con rabbitmq consumiendo %s (%s), reconecto", consumida, error)
