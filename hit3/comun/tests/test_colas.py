@@ -2,8 +2,10 @@ import json
 
 from comun import colas
 
+IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
 
-class CanalFalso:
+
+class CanalQueRegistra:
     """Registra lo que se declara y publica, con la misma firma que un canal de pika."""
 
     def __init__(self):
@@ -23,7 +25,7 @@ class CanalFalso:
 
 
 def test_declarar_crea_las_colas_fijas_quorum_y_durables():
-    canal = CanalFalso()
+    canal = CanalQueRegistra()
 
     colas.declarar(canal)
 
@@ -34,7 +36,7 @@ def test_declarar_crea_las_colas_fijas_quorum_y_durables():
 
 
 def test_declarar_ata_la_dlq_al_dlx_y_el_joiner_al_fanout_de_resultados():
-    canal = CanalFalso()
+    canal = CanalQueRegistra()
 
     colas.declarar(canal)
 
@@ -44,12 +46,10 @@ def test_declarar_ata_la_dlq_al_dlx_y_el_joiner_al_fanout_de_resultados():
                               ("sobel.joiner", "sobel.resultados", "")}
 
 
-IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
-
 
 def test_declarar_tareas_crea_la_cola_de_la_imagen_con_dead_letter_a_la_dlq(monkeypatch):
     monkeypatch.delenv("SOBEL_LIMITE_ENTREGAS", raising=False)
-    canal = CanalFalso()
+    canal = CanalQueRegistra()
 
     cola = colas.declarar_tareas(canal, IMAGEN)
 
@@ -64,7 +64,7 @@ def test_declarar_tareas_crea_la_cola_de_la_imagen_con_dead_letter_a_la_dlq(monk
 
 def test_el_limite_de_entregas_sale_de_sobel_limite_entregas(monkeypatch):
     monkeypatch.setenv("SOBEL_LIMITE_ENTREGAS", "5")
-    canal = CanalFalso()
+    canal = CanalQueRegistra()
 
     cola = colas.declarar_tareas(canal, IMAGEN)
 
@@ -72,7 +72,7 @@ def test_el_limite_de_entregas_sale_de_sobel_limite_entregas(monkeypatch):
 
 
 def test_publicar_manda_json_persistente_por_el_exchange_por_defecto():
-    canal = CanalFalso()
+    canal = CanalQueRegistra()
 
     colas.publicar(canal, "sobel.split", {"job_id": "3f6c2a9e", "archivo": 0})
 
@@ -81,3 +81,14 @@ def test_publicar_manda_json_persistente_por_el_exchange_por_defecto():
     assert json.loads(cuerpo) == {"job_id": "3f6c2a9e", "archivo": 0}
     assert propiedades.content_type == "application/json"
     assert propiedades.delivery_mode == 2
+
+
+def test_publicar_al_fanout_de_resultados_con_las_mismas_propiedades():
+    canal = CanalQueRegistra()
+
+    colas.publicar(canal, "", {"job_id": "3f6c2a9e", "fragmento": 3}, exchange="sobel.resultados")
+
+    [(exchange, routing_key, cuerpo, propiedades)] = canal.publicados
+    assert (exchange, routing_key) == ("sobel.resultados", "")
+    assert json.loads(cuerpo) == {"job_id": "3f6c2a9e", "fragmento": 3}
+    assert (propiedades.content_type, propiedades.delivery_mode) == ("application/json", 2)
