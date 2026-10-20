@@ -1,8 +1,10 @@
 import io
 import json
+import logging
 
 import fakeredis
 import numpy as np
+import pika.exceptions
 import pytest
 from PIL import Image
 
@@ -204,3 +206,83 @@ def test_un_archivo_que_pasa_el_doble_del_limite_de_pillow_tambien_deja_el_job_e
 
     assert redis.hget("job:j1", "estado") == b"failed"
     assert canal.eventos == []
+
+
+def foto(redis):
+    """Todo lo que hay en Redis, para comparar antes y después."""
+    return {clave: redis.dump(clave) for clave in redis.keys("*")}
+
+
+@pytest.mark.parametrize("estado, con_entradas", [
+    ("processing", True), ("failed", True), ("done", True),
+    ("processing", False),  # redelivery después de borrar las entradas: no puede terminar en failed
+])
+def test_un_job_que_ya_no_esta_en_cola_no_se_reparte_de_nuevo(redis, estado, con_entradas):
+    cargar_job(redis, "j1", [png(imagen_rgb(6, 4))])
+    redis.hset("job:j1", "estado", estado)
+    if not con_entradas:
+        redis.delete("job:j1:entrada:0")
+    antes = foto(redis)
+    canal = CanalQuePublica()
+
+    split.manejador(redis, partes=2)(canal, b'{"job_id": "j1"}')
+
+    assert foto(redis) == antes
+    assert canal.eventos == []
+
+
+def test_un_job_inexistente_avisa_y_no_toca_nada(redis, caplog):
+    redis.set("otra:clave", "sin relación")
+    antes = foto(redis)
+    canal = CanalQuePublica()
+
+    split.manejador(redis, partes=2, log=logging.getLogger("test"))(canal, b'{"job_id": "vencido"}')
+
+    assert foto(redis) == antes
+    assert canal.eventos == []
+    avisos = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert avisos == ["job vencido no existe (venció o el backend no lo terminó de crear), se descarta"]
+
+
+def test_las_entradas_se_borran_despues_de_publicar(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(6, 4)), png(imagen_rgb(5, 4))])
+
+    split.manejador(redis, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    assert redis.keys("job:j1:entrada:*") == []
+
+
+class CanalQueSeCorta(CanalQuePublica):
+    """Se cae RabbitMQ en la segunda publicación."""
+
+    def basic_publish(self, exchange, routing_key, body, properties=None):
+        if sum(e[0] == "publicar" for e in self.eventos) == 1:
+            raise pika.exceptions.StreamLostError("se cortó la conexión")
+        super().basic_publish(exchange, routing_key, body, properties)
+
+
+def test_si_se_corta_al_publicar_el_job_se_puede_repetir_entero(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(6, 4))])
+
+    with pytest.raises(pika.exceptions.StreamLostError):
+        split.manejador(redis, partes=2)(CanalQueSeCorta(), b'{"job_id": "j1"}')
+
+    assert redis.hget("job:j1", "estado") == b"queued"
+    assert redis.exists("job:j1:entrada:0")
+    canal = CanalQuePublica()
+    split.manejador(redis, partes=2)(canal, b'{"job_id": "j1"}')  # el redelivery
+    assert sum(e[0] == "publicar" for e in canal.eventos) == 2
+
+
+@pytest.mark.parametrize("archivos", [
+    [png(imagen_rgb(6, 4)), png(imagen_rgb(5, 4))],
+    [png(imagen_rgb(6, 4)), b"no soy una imagen"],  # job failed: lo del archivo 0 tiene que vencer igual
+], ids=["processing", "failed"])
+def test_la_geometria_y_los_fragmentos_vencen_con_el_ttl(redis, archivos):
+    cargar_job(redis, "j1", archivos)
+
+    split.manejador(redis, partes=2, ttl=3600)(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    escritas = redis.keys("job:j1:frag:*") + redis.keys("job:j1:geometria:*")
+    assert escritas
+    assert {clave: redis.ttl(clave) for clave in escritas} == {clave: 3600 for clave in escritas}

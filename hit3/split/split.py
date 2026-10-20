@@ -25,17 +25,27 @@ def fallar_por_archivo_invalido(redis, job, mensaje, ahora):
     redis.ltrim("terminados", 0, 999)
 
 
-def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split")):
-    """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada job."""
+def manejador(redis, partes, ttl=86400, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split")):
+    """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada job; lo que escribe vence en `ttl` s."""
 
     def procesar(canal, cuerpo):
         inicio = ahora_ms()
         job_id = json.loads(cuerpo)["job_id"]
         job = f"job:{job_id}"
+        estado = redis.hget(job, "estado")
+        if estado is None:
+            # Ni reintentarlo ni la DLQ lo arreglan: sobel.split no tiene DLX y el reasignador maneja tareas.
+            log.warning("job %s no existe (venció o el backend no lo terminó de crear), se descarta", job_id)
+            return
+        if estado != b"queued":
+            # Redelivery: ya se repartió (o falló) antes del ack. Repetir mandaría las tareas dos veces.
+            log.info("job %s ya está en %s, no se reparte de nuevo", job_id, estado.decode())
+            return
         operaciones = json.loads(redis.hget(job, "operaciones"))
         filas_de_borde = sum(paso["operacion"] in OPERACIONES_DE_VECINDAD for paso in operaciones)
         tareas = []
-        for archivo in range(int(redis.hget(job, "archivos"))):
+        archivos = int(redis.hget(job, "archivos"))
+        for archivo in range(archivos):
             try:
                 matriz = pixeles.leer_rgb(redis.get(f"{job}:entrada:{archivo}"))
             except ValueError:
@@ -47,11 +57,12 @@ def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.sp
             fragmentos = pixeles.dividir(matriz, partes, filas_de_borde)
             geometria = {"total": len(fragmentos)}
             for f, (franja, extra, filas) in enumerate(fragmentos):
-                redis.set(f"{job}:frag:{archivo}:{f}:0", pixeles.a_png(franja))
+                redis.set(f"{job}:frag:{archivo}:{f}:0", pixeles.a_png(franja), ex=ttl)
                 geometria[f] = f"{extra},{filas}"
                 tareas.append({"job_id": job_id, "archivo": archivo, "fragmento": f, "paso": 0,
                                "operaciones": operaciones, "intento": 1})
             redis.hset(f"{job}:geometria:{archivo}", mapping=geometria)
+            redis.expire(f"{job}:geometria:{archivo}", ttl)
 
         cola = colas.declarar_tareas(canal, operaciones[0]["imagen"])
         for tarea in tareas:
@@ -59,6 +70,8 @@ def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.sp
         t_split_ms = ahora_ms() - inicio
         redis.hset(job, mapping={"estado": "processing", "fragmentos_total": len(tareas),
                                  "t_split_ms": t_split_ms})
+        # Recién ahora: con el job en processing, un redelivery ya no las necesita (§10: las borra el split).
+        redis.delete(*(f"{job}:entrada:{archivo}" for archivo in range(archivos)))
         log.info("job %s: %d fragmentos a %s en %d ms", job_id, len(tareas), cola, t_split_ms)
 
     return procesar
@@ -68,10 +81,11 @@ def main():
     log, _ = registro.configurar("split")
     redis = conexion.conectar_redis(log=log)
     partes = int(os.environ.get("SOBEL_PARTES", "4"))
+    ttl = int(os.environ.get("SOBEL_TTL", "86400"))
     if partes < 1:
         raise RuntimeError(f"SOBEL_PARTES tiene que ser al menos 1 (llegó {partes})")
     log.info("split consumiendo %s, %d partes por archivo", colas.SPLIT, partes)
-    conexion.consumir(colas.SPLIT, manejador(redis, partes, log=log), al_conectar=colas.declarar,
+    conexion.consumir(colas.SPLIT, manejador(redis, partes, ttl, log=log), al_conectar=colas.declarar,
                       cliente_redis=redis, log=log)
 
 
