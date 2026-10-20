@@ -103,19 +103,23 @@ def manejador(redis, partes, ttl=TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logg
     return procesar
 
 
+def entero_de_entorno(nombre, por_defecto, minimo):
+    valor = int(os.environ.get(nombre, por_defecto))
+    if valor < minimo:
+        raise RuntimeError(f"{nombre} tiene que ser al menos {minimo} (llegó {valor})")
+    return valor
+
+
 def main():
     log, _ = registro.configurar("split")
-    partes = int(os.environ.get("SOBEL_PARTES", "4"))
-    if partes < 1:
-        raise RuntimeError(f"SOBEL_PARTES tiene que ser al menos 1 (llegó {partes})")
-    ttl = int(os.environ.get("SOBEL_TTL", TTL_POR_DEFECTO))
-    if ttl < 1:
-        raise RuntimeError(f"SOBEL_TTL tiene que ser al menos 1 segundo (llegó {ttl})")
-    puerto = int(os.environ.get("SOBEL_PUERTO", "8080"))
-    # Antes de conectarse: mientras reintenta con backoff, la probe ve `caido` en vez de no tener respuesta.
-    salud.servir("split", puerto, conexion.estado)
+    partes = entero_de_entorno("SOBEL_PARTES", 4, 1)
+    ttl = entero_de_entorno("SOBEL_TTL", TTL_POR_DEFECTO, 1)
+    puerto = entero_de_entorno("SOBEL_PUERTO", 8080, 1)
+    redis = conexion.cliente_redis()
+    # Antes de conectarse: mientras espera con backoff, la probe ve `caido` en vez de no tener respuesta.
+    salud.servir("split", puerto, conexion.estado, redis=redis)
     log.info("split: /health en el puerto %d", puerto)
-    redis = conexion.conectar_redis(log=log)
+    conexion.con_backoff(redis.ping, "redis", log=log)
     log.info("split consumiendo %s, %d partes por archivo", colas.SPLIT, partes)
     conexion.consumir(colas.SPLIT, manejador(redis, partes, ttl, log=log), al_conectar=colas.declarar,
                       cliente_redis=redis, log=log)
