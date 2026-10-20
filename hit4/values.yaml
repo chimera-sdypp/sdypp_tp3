@@ -1,0 +1,137 @@
+# ==============================================================================
+# Values para kube-prometheus-stack (Helm Chart) — Hit #4: Observabilidad
+# ==============================================================================
+# Configura el stack de observabilidad (Prometheus, Grafana y Alertmanager)
+# anclado estrictamente al pool de infraestructura (pool=infra).
+# ==============================================================================
+
+defaultRules:
+  create: true
+  rules:
+    alertmanager: true
+    etcd: false
+    k8s: true
+    kubeApiserver: true
+    kubePrometheusNodeAlerting: true
+    nodeExporterAlerting: true
+
+# Configuración global para seleccionar recursos en cualquier namespace
+global:
+  rbac:
+    create: true
+
+# ------------------------------------------------------------------------------
+# 1. Prometheus Server
+# ------------------------------------------------------------------------------
+prometheus:
+  enabled: true
+  prometheusSpec:
+    # Permitir que Prometheus descubra ServiceMonitors y Rules de cualquier namespace
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    ruleNamespaceSelector: {}
+
+    scrapeInterval: "10s"
+    evaluationInterval: "10s"
+
+    # Segmentación en el grupo de nodos de infraestructura
+    nodeSelector:
+      pool: infra
+    tolerations:
+      - key: "pool"
+        operator: "Equal"
+        value: "infra"
+        effect: "NoSchedule"
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1536Mi
+
+    retention: "7d"
+    retentionSize: "5Gi"
+
+# ------------------------------------------------------------------------------
+# 2. Grafana
+# ------------------------------------------------------------------------------
+grafana:
+  enabled: true
+  adminPassword: "admin"
+  
+  # Segmentación en el pool de infraestructura
+  nodeSelector:
+    pool: infra
+  tolerations:
+    - key: "pool"
+      operator: "Equal"
+      value: "infra"
+      effect: "NoSchedule"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+      defaultDatasourceEnabled: true
+
+# ------------------------------------------------------------------------------
+# 3. Alertmanager
+# ------------------------------------------------------------------------------
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    nodeSelector:
+      pool: infra
+    tolerations:
+      - key: "pool"
+        operator: "Equal"
+        value: "infra"
+        effect: "NoSchedule"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+# ------------------------------------------------------------------------------
+# 4. Node Exporter (Métricas de CPU y Memoria por Nodo)
+# ------------------------------------------------------------------------------
+nodeExporter:
+  enabled: true
+
+# ------------------------------------------------------------------------------
+# 5. Kube-State-Metrics (Métricas de Pods, Deployments y Estado del Clúster)
+# ------------------------------------------------------------------------------
+kubeStateMetrics:
+  enabled: true
+  nodeSelector:
+    pool: infra
+  tolerations:
+    - key: "pool"
+      operator: "Equal"
+      value: "infra"
+      effect: "NoSchedule"
