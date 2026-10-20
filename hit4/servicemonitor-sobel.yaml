@@ -12,7 +12,7 @@ spec:
       - sobel
   selector:
     matchLabels:
-      pool: apps
+      sobel/apps: "true"
   endpoints:
     - port: http
       path: /metrics
