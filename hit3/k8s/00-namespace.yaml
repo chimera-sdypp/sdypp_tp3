@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sobel
+  labels:
+    app.kubernetes.io/part-of: sobel-distribuido
+    app.kubernetes.io/name: sobel-namespace

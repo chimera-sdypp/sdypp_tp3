@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: sobel
+
+resources:
+  - 00-namespace.yaml
+  - 01-rabbitmq.yaml
+  - 02-redis.yaml
+  - 03-backend.yaml
+  - 04-split.yaml
+  - 05-workers.yaml
+  - 06-joiner.yaml
+  - 07-reasignador.yaml
+  - 08-frontend.yaml
+  - 09-ingress.yaml
