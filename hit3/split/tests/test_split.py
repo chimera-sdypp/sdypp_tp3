@@ -9,7 +9,10 @@ from PIL import Image
 from split import split
 
 IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
-GRISES = [{"operacion": "grises", "imagen": IMAGEN}]
+
+
+def cadena(*operaciones):
+    return [{"operacion": op, "imagen": IMAGEN} for op in operaciones]
 
 
 class CanalQuePublica:
@@ -40,7 +43,7 @@ def redis():
     return fakeredis.FakeRedis()
 
 
-def cargar_job(redis, job_id, archivos, operaciones=GRISES):
+def cargar_job(redis, job_id, archivos, operaciones=cadena("grises")):
     """Deja el job como lo deja el backend (contrato §10) antes de publicarlo en sobel.split."""
     redis.hset(f"job:{job_id}", mapping={
         "usuario": "ana", "estado": "queued", "creado": 1761055391000,
@@ -58,14 +61,17 @@ def test_un_job_en_cola_pasa_a_processing(redis):
     assert redis.hget("job:j1", "estado") == b"processing"
 
 
+def leer_fragmento(redis, job_id, archivo, fragmento):
+    return np.asarray(Image.open(io.BytesIO(redis.get(f"job:{job_id}:frag:{archivo}:{fragmento}:0"))))
+
+
 def reconstruir(redis, job_id, archivo):
     """Une los fragmentos del paso 0 recortando los bordes según la geometría (§10), como lo hará el joiner."""
     geometria = {k.decode(): v.decode() for k, v in redis.hgetall(f"job:{job_id}:geometria:{archivo}").items()}
     franjas = []
     for f in range(int(geometria["total"])):
         extra, filas = map(int, geometria[str(f)].split(","))
-        fragmento = np.asarray(Image.open(io.BytesIO(redis.get(f"job:{job_id}:frag:{archivo}:{f}:0"))))
-        franjas.append(fragmento[extra:extra + filas])
+        franjas.append(leer_fragmento(redis, job_id, archivo, f)[extra:extra + filas])
     return np.vstack(franjas)
 
 
@@ -87,7 +93,7 @@ def test_declara_la_cola_de_la_imagen_del_primer_paso_y_publica_una_tarea_por_fr
 
     cola = "sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
     assert canal.eventos == [("declarar", cola)] + [
-        ("publicar", cola, {"job_id": "j1", "archivo": 0, "fragmento": f, "paso": 0, "operaciones": GRISES,
+        ("publicar", cola, {"job_id": "j1", "archivo": 0, "fragmento": f, "paso": 0, "operaciones": cadena("grises"),
                             "intento": 1, "encolado": 1761055391204})
         for f in range(3)
     ]
@@ -100,10 +106,6 @@ def test_un_png_con_alfa_se_reparte_en_rgb_sin_el_canal_alfa(redis):
     split.manejador(redis, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     np.testing.assert_array_equal(reconstruir(redis, "j1", 0), con_alfa[:, :, :3])
-
-
-def cadena(*operaciones):
-    return [{"operacion": op, "imagen": IMAGEN} for op in operaciones]
 
 
 # 10 filas en 4 partes: límites 0, 2, 5, 7, 10. Cada operación de vecindad suma una fila de borde por lado,
@@ -122,8 +124,7 @@ def test_cada_fragmento_lleva_una_fila_de_borde_por_operacion_de_vecindad(redis,
 
     guardada = {k.decode(): v.decode() for k, v in redis.hgetall("job:j1:geometria:0").items()}
     assert guardada == {"total": "4", **geometria}
-    fragmentos = [Image.open(io.BytesIO(redis.get(f"job:j1:frag:0:{f}:0"))) for f in range(4)]
-    assert [f.height for f in fragmentos] == altos
+    assert [leer_fragmento(redis, "j1", 0, f).shape[0] for f in range(4)] == altos
     np.testing.assert_array_equal(reconstruir(redis, "j1", 0), original)
 
 

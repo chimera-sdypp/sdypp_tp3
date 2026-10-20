@@ -8,7 +8,8 @@ import time
 from comun import colas, conexion, pixeles, registro
 
 
-# Cada una mira los 8 vecinos de cada píxel (kernel 3×3): suma una fila de borde por lado (contrato §10).
+# Suman una fila de borde por lado (contrato §10). Supone kernels 3×3: el de `blur` se fija en M3 y se
+# confirma con Tomás; si fuera más grande, haría falta más de una fila por `blur`.
 OPERACIONES_DE_VECINDAD = {"sobel", "blur"}
 
 
@@ -24,11 +25,11 @@ def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.sp
         job_id = json.loads(cuerpo)["job_id"]
         job = f"job:{job_id}"
         operaciones = json.loads(redis.hget(job, "operaciones"))
-        bordes = sum(paso["operacion"] in OPERACIONES_DE_VECINDAD for paso in operaciones)
+        filas_de_borde = sum(paso["operacion"] in OPERACIONES_DE_VECINDAD for paso in operaciones)
         tareas = []
         for archivo in range(int(redis.hget(job, "archivos"))):
             matriz = pixeles.leer_rgb(redis.get(f"{job}:entrada:{archivo}"))
-            fragmentos = pixeles.dividir(matriz, partes, bordes)
+            fragmentos = pixeles.dividir(matriz, partes, filas_de_borde)
             geometria = {"total": len(fragmentos)}
             for f, (franja, extra, filas) in enumerate(fragmentos):
                 redis.set(f"{job}:frag:{archivo}:{f}:0", pixeles.a_png(franja))
@@ -50,6 +51,8 @@ def main():
     log, _ = registro.configurar("split")
     redis = conexion.conectar_redis(log=log)
     partes = int(os.environ.get("SOBEL_PARTES", "4"))
+    if partes < 1:
+        raise RuntimeError(f"SOBEL_PARTES tiene que ser al menos 1 (llegó {partes})")
     log.info("split consumiendo %s, %d partes por archivo", colas.SPLIT, partes)
     conexion.consumir(colas.SPLIT, manejador(redis, partes, log=log), al_conectar=colas.declarar,
                       cliente_redis=redis, log=log)

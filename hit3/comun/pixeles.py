@@ -12,8 +12,8 @@ def leer_rgb(datos):
         return np.asarray(archivo.convert("RGB"))
 
 
-def dividir(matriz, partes, bordes=0):
-    """Parte en `partes` franjas horizontales con `bordes` filas extra arriba y abajo (si existen).
+def dividir(matriz, partes, filas_de_borde):
+    """Parte en `partes` franjas horizontales con `filas_de_borde` filas extra arriba y abajo (si existen).
 
     Si la imagen tiene menos filas que `partes`, da una franja por fila (contrato §12, SOBEL_PARTES).
     Devuelve una lista de (franja_con_bordes, filas_extra_arriba, filas).
@@ -22,8 +22,8 @@ def dividir(matriz, partes, bordes=0):
     limites = np.linspace(0, alto, min(partes, alto) + 1).astype(int)
     franjas = []
     for desde, hasta in zip(limites[:-1], limites[1:]):
-        arriba = max(desde - bordes, 0)
-        franjas.append((matriz[arriba:min(hasta + bordes, alto)], int(desde - arriba), int(hasta - desde)))
+        arriba = max(desde - filas_de_borde, 0)
+        franjas.append((matriz[arriba:min(hasta + filas_de_borde, alto)], int(desde - arriba), int(hasta - desde)))
     return franjas
 
 
