@@ -13,16 +13,16 @@ GRISES = [{"operacion": "grises", "imagen": IMAGEN}]
 
 
 class CanalQuePublica:
-    """Lo que el split usa de un canal de pika: declarar la cola de tareas y publicar."""
+    """Lo que el split usa de un canal de pika: declarar la cola de tareas y publicar, en orden."""
 
     def __init__(self):
-        self.colas, self.publicados = set(), []
+        self.eventos = []
 
     def queue_declare(self, queue, durable=False, arguments=None):
-        self.colas.add(queue)
+        self.eventos.append(("declarar", queue))
 
     def basic_publish(self, exchange, routing_key, body, properties=None):
-        self.publicados.append((routing_key, json.loads(body)))
+        self.eventos.append(("publicar", routing_key, json.loads(body)))
 
 
 def png(matriz, modo=None):
@@ -79,17 +79,16 @@ def test_los_fragmentos_y_la_geometria_reconstruyen_el_archivo(redis):
     np.testing.assert_array_equal(reconstruir(redis, "j1", 0), original)
 
 
-def test_publica_una_tarea_por_fragmento_a_la_cola_de_la_imagen_del_primer_paso(redis):
+def test_declara_la_cola_de_la_imagen_del_primer_paso_y_publica_una_tarea_por_fragmento(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(9, 4))])
     canal = CanalQuePublica()
 
     split.manejador(redis, partes=3, ahora_ms=lambda: 1761055391204)(canal, b'{"job_id": "j1"}')
 
     cola = "sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
-    assert canal.colas == {cola}
-    assert canal.publicados == [
-        (cola, {"job_id": "j1", "archivo": 0, "fragmento": f, "paso": 0, "operaciones": GRISES,
-                "intento": 1, "encolado": 1761055391204})
+    assert canal.eventos == [("declarar", cola)] + [
+        ("publicar", cola, {"job_id": "j1", "archivo": 0, "fragmento": f, "paso": 0, "operaciones": GRISES,
+                            "intento": 1, "encolado": 1761055391204})
         for f in range(3)
     ]
 

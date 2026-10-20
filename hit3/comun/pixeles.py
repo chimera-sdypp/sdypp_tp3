@@ -1,4 +1,4 @@
-"""Lectura, partición en fragmentos y codificación de imágenes. El split divide y el joiner une con la misma geometría."""
+"""Píxeles de un archivo: lectura en RGB, partición en fragmentos y codificación a PNG."""
 
 import io
 
@@ -8,8 +8,8 @@ from PIL import Image
 
 def leer_rgb(datos):
     """Bytes PNG o JPEG → matriz uint8 (alto, ancho, 3). Normaliza a RGB: paletas, grises y CMYK; el alfa se pierde."""
-    with Image.open(io.BytesIO(datos)) as imagen:
-        return np.asarray(imagen.convert("RGB"))
+    with Image.open(io.BytesIO(datos)) as archivo:
+        return np.asarray(archivo.convert("RGB"))
 
 
 def dividir(matriz, partes):

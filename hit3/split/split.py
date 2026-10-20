@@ -5,7 +5,7 @@ import logging
 import os
 import time
 
-from comun import colas, conexion, imagen, registro
+from comun import colas, conexion, pixeles, registro
 
 
 def ahora_en_ms():
@@ -22,11 +22,11 @@ def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.sp
         operaciones = json.loads(redis.hget(job, "operaciones"))
         tareas = []
         for archivo in range(int(redis.hget(job, "archivos"))):
-            matriz = imagen.leer_rgb(redis.get(f"{job}:entrada:{archivo}"))
-            fragmentos = imagen.dividir(matriz, partes)
+            matriz = pixeles.leer_rgb(redis.get(f"{job}:entrada:{archivo}"))
+            fragmentos = pixeles.dividir(matriz, partes)
             geometria = {"total": len(fragmentos)}
             for f, (franja, extra, filas) in enumerate(fragmentos):
-                redis.set(f"{job}:frag:{archivo}:{f}:0", imagen.a_png(franja))
+                redis.set(f"{job}:frag:{archivo}:{f}:0", pixeles.a_png(franja))
                 geometria[f] = f"{extra},{filas}"
                 tareas.append({"job_id": job_id, "archivo": archivo, "fragmento": f, "paso": 0,
                                "operaciones": operaciones, "intento": 1})
