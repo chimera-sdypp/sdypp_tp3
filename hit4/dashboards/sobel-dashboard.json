@@ -113,7 +113,7 @@
       },
       "targets": [
         {
-          "expr": "count(kube_pod_status_phase{namespace=\"sobel\", phase=\"Running\", pod=~\"(sobel|grises|blur)-worker-.*\"}) or count(up{namespace=\"sobel\", job=~\".*worker.*\"} == 1) or vector(0)",
+          "expr": "count(kube_pod_status_phase{namespace=\"sobel\", phase=\"Running\", pod=~\".*worker.*\"}) or count(up{namespace=\"sobel\", job=~\".*worker.*\"} == 1) or vector(0)",
           "refId": "A"
         }
       ],
