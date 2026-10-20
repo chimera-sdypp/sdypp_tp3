@@ -23,12 +23,12 @@ def ahora_en_ms():
 
 
 def fallar_por_archivo_invalido(redis, job, archivos, mensaje, ahora):
-    """Deja el job en `failed` con error ARCHIVO_INVALIDO, lo anota en `terminados` (los últimos 1000) y borra
-    las entradas. Todo junto: si se cortara en el medio, el redelivery vería `failed` y no completaría el resto."""
+    """Deja el job en `failed` con error ARCHIVO_INVALIDO y `terminado`, lo anota en `terminados` (los últimos 1000)
+    y borra las entradas. Todo junto: si se cortara en el medio, el redelivery vería `failed` y no completaría el resto."""
     error = {"tipo": "ARCHIVO_INVALIDO", "mensaje": mensaje}
     total_ms = ahora - int(redis.hget(job, "creado"))
     with redis.pipeline() as transaccion:
-        transaccion.hset(job, mapping={"estado": "failed", "error": json.dumps(error)})
+        transaccion.hset(job, mapping={"estado": "failed", "error": json.dumps(error), "terminado": ahora})
         transaccion.lpush("terminados", f"failed {total_ms}")
         transaccion.ltrim("terminados", 0, 999)
         transaccion.delete(*(f"{job}:entrada:{archivo}" for archivo in range(archivos)))

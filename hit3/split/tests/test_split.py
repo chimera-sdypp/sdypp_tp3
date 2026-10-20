@@ -181,6 +181,7 @@ def test_un_archivo_que_no_se_decodifica_deja_el_job_en_failed_sin_publicar_nada
     assert redis.hget("job:j1", "estado") == b"failed"
     assert json.loads(redis.hget("job:j1", "error")) == {
         "tipo": "ARCHIVO_INVALIDO", "mensaje": "el archivo 1 no se pudo decodificar"}
+    assert redis.hget("job:j1", "terminado") == b"1761055392500"
     assert redis.lrange("terminados", 0, -1) == [b"failed 1500"]
     assert canal.eventos == []
 
