@@ -143,11 +143,28 @@ jobs:
       - name: Tests del split
         run: python -m pytest -v split
 
+  hit0:
+    name: Hit 0 — Queue (Ejemplos 1, 2, 3 y 4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install pika pytest
+      - name: Tests unitarios de cada ejemplo
+        run: |
+          for ex in TP3/queue/ex1 TP3/queue/ex2 TP3/queue/ex3 TP3/queue/ex4; do
+            echo "--- Corriendo tests de $ex ---"
+            (cd "$ex" && python -m pytest -v tests)
+          done
+
   # Sólo al mergear a dev o a main, o con un tag v*: los PR prueban pero no publican.
   servicios:
     name: Servicios con imagen
     if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    needs: [gitleaks, hit1, hit3, hit3-backend, hit3-frontend]
+    needs: [gitleaks, hit0, hit1, hit3, hit3-backend, hit3-frontend]
     runs-on: ubuntu-latest
     outputs:
       lista: ${{ steps.buscar.outputs.lista }}
@@ -194,3 +211,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.servicio }}
           cache-to: type=gha,mode=max,scope=${{ matrix.servicio }}
+
