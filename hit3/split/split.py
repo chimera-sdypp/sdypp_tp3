@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import signal
+import sys
 import time
 
 from comun import colas, conexion, pixeles, registro, salud
@@ -112,6 +114,9 @@ def entero_de_entorno(nombre, por_defecto, minimo):
 
 def main():
     log, _ = registro.configurar("split")
+    # Como PID 1 del contenedor, sin handler el SIGTERM se ignora y k8s espera el período de gracia para matarlo.
+    # Salir corta el job en curso sin ack: RabbitMQ lo reentrega y el split tolera el redelivery.
+    signal.signal(signal.SIGTERM, lambda senal, _frame: sys.exit(0))
     partes = entero_de_entorno("SOBEL_PARTES", 4, 1)
     ttl = entero_de_entorno("SOBEL_TTL", TTL_POR_DEFECTO, 1)
     puerto = entero_de_entorno("SOBEL_PUERTO", 8080, 1)
