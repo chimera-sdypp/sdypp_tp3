@@ -1,6 +1,31 @@
+# Secretos: nunca al repo. Van por GitHub Secrets o archivos montados en el host.
+.env
+.env.*
+!.env.example
+secretos/
+*.pem
+*.key
+
 # Python
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs y datos que genera la ejecución
+logs/
+*.log
+
+# Editores y sistema
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# De los ejemplos del Hit #0
 *$py.class
 *.so
 .Python
@@ -19,43 +44,19 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Virtual Environments
-.env
 .venv
 env/
-venv/
 ENV/
 env.bak/
 venv.bak/
-
-# Environment variables & secrets
 *.env
 *.env.*
 !*.env.example
-*.pem
-*.key
 *.cert
 *.crt
 *.secrets
-
-# Testing & Coverage
-.pytest_cache/
-.coverage
-htmlcov/
 .tox/
 .nox/
-
-# IDE & Editors
-.idea/
-.vscode/
-*.swp
 *.swo
 *~
-
-# Operating System
-.DS_Store
 Thumbs.db
-
-# Logs
-*.log

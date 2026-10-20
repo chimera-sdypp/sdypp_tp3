@@ -1,0 +1,65 @@
+# Etapa 3 sobre k3s: un worker que se cae y otro que no responde, detrás del mismo Service
+# headless que los sanos (comparten la etiqueta `rol: sobel-worker`). Tienen su propio
+# `app` porque dos Deployments con selectores superpuestos se pelearían por los pods.
+#   kubectl apply -f k8s/sobel.yaml -f k8s/fallas.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sobel-worker-caido
+  namespace: sobel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sobel-worker-caido
+  template:
+    metadata:
+      labels:
+        app: sobel-worker-caido
+        rol: sobel-worker
+    spec:
+      containers:
+        - name: worker
+          image: sobel-hit1:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SOBEL_FALLA
+              value: caida                 # el proceso termina al recibir una franja; k8s lo reinicia
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sobel-worker-colgado
+  namespace: sobel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sobel-worker-colgado
+  template:
+    metadata:
+      labels:
+        app: sobel-worker-colgado
+        rol: sobel-worker
+    spec:
+      containers:
+        - name: worker
+          image: sobel-hit1:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SOBEL_FALLA
+              value: colgado               # /health contesta, pero las franjas nunca vuelven
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 5
