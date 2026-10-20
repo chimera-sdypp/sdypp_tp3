@@ -19,6 +19,49 @@ jobs:
             | tar -xz gitleaks
           ./gitleaks git --redact -v .
 
+  hit3-backend:
+    name: Hit 3 — backend (tests, integración con RabbitMQ y Redis, imagen)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit3/backend
+    # Sin healthcheck de rabbitmq-diagnostics: corre como root y, si llega antes que el broker,
+    # crea un .erlang.cookie de root y RabbitMQ muere (eacces). Se espera desde el runner.
+    services:
+      rabbitmq:
+        image: rabbitmq:4-management
+        ports: ["5672:5672"]
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+    env:
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/%2F
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Tests unitarios
+        run: python -m pytest -v
+      - name: Esperar a RabbitMQ
+        run: |
+          python -c "
+          import time, pika
+          for _ in range(60):
+              try:
+                  pika.BlockingConnection(pika.URLParameters('$RABBITMQ_URL')).close(); break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise SystemExit('RabbitMQ no arrancó')"
+      - name: Integración con RabbitMQ y Redis
+        run: python -m pytest -v -m integracion
+      - name: Construir la imagen
+        run: docker build -f Dockerfile -t sobel-backend:ci ..
+
   hit1:
     name: Hit 1 — Sobel (tests, integración y tolerancia a fallos con Docker)
     runs-on: ubuntu-latest

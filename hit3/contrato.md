@@ -206,6 +206,7 @@ Datos que **no** devolvemos y podríamos devolver:
 | CPU y memoria que consumió el job | Los workers procesan fragmentos de varios jobs a la vez; repartir el consumo por job necesita medir cada fragmento. A nivel pod está en Grafana |
 | Digest de la imagen que procesó cada fragmento | El pedido ya fija tag o digest. Si fija un tag y se republica con otro contenido, no se nota: por eso conviene pedir por digest |
 | Progreso por paso | `completos` cuenta sólo los fragmentos que terminaron todos los pasos |
+| Transparencia (canal alfa) de los PNG | El split pasa todo a RGB, que es lo que usan las tres operaciones: el resultado sale sin alfa |
 
 ## 8. SLO (para la matriz de R5)
 
@@ -227,7 +228,7 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 | Nombre | Tipo | Quién publica → quién consume |
 |---|---|---|
 | `sobel.split` | cola quorum | backend → split |
-| `sobel.tareas.<imagen>` | cola quorum, una por imagen de worker, con DLX `sobel.dlx` y `x-delivery-limit` | split, worker y reasignador → workers de esa imagen |
+| `sobel.tareas.<imagen>` | cola quorum, una por imagen de worker, con DLX `sobel.dlx`, routing key `sobel.dlq` y `x-delivery-limit` | split, worker y reasignador → workers de esa imagen |
 | `sobel.dlx` | exchange direct | lo usa RabbitMQ al descartar un mensaje |
 | `sobel.dlq` | cola quorum, atada a `sobel.dlx` | RabbitMQ → reasignador |
 | `sobel.dlq.agotados` | cola quorum | reasignador → backend (al reprocesar) |
@@ -236,6 +237,9 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 | (sin nombre) | cola exclusiva, atada a `sobel.resultados` | → frontend; una por réplica, se borra sola |
 
 - `<imagen>` es la referencia completa de la imagen (`sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0`).
+- Todos declaran con `hit3/comun/colas.py` y el mismo `SOBEL_LIMITE_ENTREGAS`: si una cola ya existe con otros
+  argumentos, RabbitMQ responde `PRECONDITION_FAILED`, y para cambiarlos hay que borrarla. RabbitMQ cuenta
+  *reentregas*: con 3, un mensaje se entrega hasta 4 veces antes de ir a la DLQ.
 - Quien publica a una `sobel.tareas.<imagen>` la declara antes. La declaración es idempotente y evita que un mensaje
   se pierda si todavía no arrancó ningún worker de esa imagen.
 - Mensajes JSON (`content_type: application/json`) y persistentes (`delivery_mode: 2`). Los píxeles **no viajan
@@ -268,7 +272,7 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
    publica el resultado en `sobel.resultados`.
 3. Suma sus tiempos al job y se anota en `job:<id>:workers` (§10).
 4. Hace `ack` y borra la entrada. Si se cae antes del `ack`, el paso se repite: como las claves se pisan con lo mismo,
-   repetir no rompe nada.
+   repetir no rompe nada; sólo los promedios de `tiempos_s` cuentan ese fragmento de más.
 
 **`sobel.resultados`**:
 
@@ -298,16 +302,17 @@ Todas las claves de un job empiezan con `job:<id>` y vencen a las 24 h (`SOBEL_T
 **Quién escribe qué en `job:<id>`:**
 
 - **backend:** crea el hash (`usuario`, `estado=queued`, `creado`, `operaciones`, `archivos`) y las entradas. Al reprocesar
-  la DLQ: `estado=processing` y resta de `en_dlq`.
+  la DLQ: `estado=processing`, borra `error` y `terminado`, y resta de `en_dlq`.
 - **split:** `estado=processing`, `fragmentos_total`, `t_split_ms`, la geometría y los fragmentos del paso 0. Si un
-  archivo no se puede decodificar: `estado=failed`, `error` y la entrada en `terminados`.
+  archivo no se puede decodificar: `estado=failed`, `error`, `terminado` y la entrada en `terminados`.
 - **worker:** `cola_ms`, `cola_n`, `proc_ms`, `proc_n` (con `HINCRBY`) y `job:<id>:workers`.
 - **joiner:** `completos`, los resultados, y al final `estado=done`, `terminado`, `t_join_ms` y la entrada en `terminados`.
   Borra los fragmentos del último paso después de unir.
-- **reasignador:** `reintentos`. Cuando un fragmento agota los intentos: `en_dlq`, `estado=dlq`, `error` y la entrada en `terminados`.
+- **reasignador:** `reintentos`. Cuando un fragmento agota los intentos: `en_dlq`, `estado=dlq`, `error`, `terminado` y la entrada en `terminados`.
 
 **Bordes.** Sobel y blur necesitan los vecinos de cada píxel. El split le agrega a cada fragmento tantas filas extra
-arriba y abajo como operaciones de vecindad tenga la cadena (`sobel` y `blur` cuentan; `grises` no), y anota en
+arriba y abajo como operaciones de vecindad tenga la cadena (`sobel` y `blur` cuentan; `grises` no; con un `blur` de más
+de 3×3 harían falta más filas), y anota en
 `geometria` cuántas puso arriba y cuántas filas le pertenecen. El worker procesa el fragmento entero, sin saber de
 bordes, y el joiner recorta. Así el resultado es idéntico al de aplicar la cadena a la imagen entera, como en el Hit 1.
 
@@ -347,9 +352,10 @@ conexión está caída. Las conexiones a RabbitMQ y Redis se reintentan con back
 | `REDIS_URL` | todos | — | `redis://:clave@host:6379/0` (Secret) |
 | `SOBEL_PUERTO` | todos | `8080` | Puerto HTTP |
 | `SOBEL_TTL` | todos | `86400` | Segundos que viven las claves de un job |
+| `SOBEL_LIMITE_ENTREGAS` | todos | `3` | `x-delivery-limit` de las `sobel.tareas.<imagen>`. Igual en todos (§9) |
 | `SOBEL_SECRETO` | backend | — | Firma de los JWT (Secret) |
 | `SOBEL_IMAGENES_PERMITIDAS` | backend | — | Imágenes de worker permitidas, separadas por coma |
-| `SOBEL_SERVICIOS` | backend | — | `nombre=url` separados por coma: los `/health` que resume el `/health` público |
+| `SOBEL_SERVICIOS` | backend | — | `nombre=url` separados por coma: la URL completa del `/health` de cada servicio que resume el público (`split=http://split:8080/health`). Sin `backend`, `redis`, `rabbitmq` ni `workers`, que los informa el backend |
 | `SOBEL_PEDIDOS_POR_MINUTO` | backend | `120` | Límite por usuario |
 | `SOBEL_PARTES` | split | `4` | Fragmentos por archivo (menos si la imagen tiene menos filas) |
 | `SOBEL_IMAGEN` | worker | — | La referencia de su propia imagen; tiene que coincidir con la de `SOBEL_IMAGENES_PERMITIDAS` |
