@@ -1,3 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: sobel-worker
+  namespace: sobel
+  labels:
+    app.kubernetes.io/name: sobel-worker
+    app.kubernetes.io/component: worker
+    operacion: sobel
+    pool: apps
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: sobel-worker
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -77,6 +96,25 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grises-worker
+  namespace: sobel
+  labels:
+    app.kubernetes.io/name: grises-worker
+    app.kubernetes.io/component: worker
+    operacion: grises
+    pool: apps
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: grises-worker
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment

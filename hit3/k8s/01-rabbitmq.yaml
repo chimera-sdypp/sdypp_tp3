@@ -99,19 +99,17 @@ spec:
               cpu: 1000m
               memory: 1024Mi
           readinessProbe:
-            httpGet:
-              path: /api/health/checks/ready
-              port: 15672
-            initialDelaySeconds: 15
-            periodSeconds: 10
-            timeoutSeconds: 5
+            tcpSocket:
+              port: 5672
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
           livenessProbe:
-            httpGet:
-              path: /api/health/checks/alarms
-              port: 15672
+            tcpSocket:
+              port: 5672
             initialDelaySeconds: 20
-            periodSeconds: 15
-            timeoutSeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
       volumes:
         - name: plugins-config
           configMap:
