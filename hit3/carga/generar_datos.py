@@ -23,8 +23,24 @@ from pathlib import Path
 DIR_BASE = Path(__file__).resolve().parent
 DIR_DATOS = DIR_BASE / "datos"
 
-# Secreto predeterminado del contrato y de Kubernetes (sobel-secretos)
-SOBEL_SECRETO_DEFAULT = os.environ.get("SOBEL_SECRETO", "secreto-sobel-super-seguro")
+def obtener_secreto() -> str:
+    """Obtiene el secreto JWT desde entorno o desde .env.secrets generado por crear_secretos.sh."""
+    if "SOBEL_SECRETO" in os.environ and os.environ["SOBEL_SECRETO"]:
+        return os.environ["SOBEL_SECRETO"]
+    for p in [DIR_BASE / ".env.secrets", DIR_BASE.parent.parent / ".env.secrets"]:
+        if p.exists():
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("SOBEL_SECRETO="):
+                        val = line.split("=", 1)[1].strip()
+                        if val:
+                            return val
+            except Exception:
+                pass
+    return "secreto-sobel-super-seguro"
+
+
+SOBEL_SECRETO_DEFAULT = obtener_secreto()
 
 
 def b64url(data: bytes) -> str:
