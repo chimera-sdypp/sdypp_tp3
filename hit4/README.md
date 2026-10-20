@@ -6,11 +6,11 @@ Este módulo implementa el stack integral de observabilidad para la arquitectura
 
 ## 1. Arquitectura y Segmentación de Recursos
 
-Siguiendo las decisiones del proyecto, todo el stack de observabilidad corre en el grupo de nodos de infraestructura (**`pool=infra`**) mediante `nodeSelector` y `tolerations` configurados en [`values.yaml`](values.yaml):
+Siguiendo las decisiones del proyecto, todo el stack de observabilidad corre en el grupo de nodos de infraestructura (**`sobel/infra=true`**) mediante `nodeSelector` y `tolerations` configurados en [`values.yaml`](values.yaml):
 
 ```mermaid
 flowchart TD
-    subgraph pool=apps [Grupo: pool=apps]
+    subgraph apps_pool [Grupo: sobel/apps=true]
         B[Backend :8080]
         S[Split :8080]
         W[Workers :8080]
@@ -18,7 +18,7 @@ flowchart TD
         R[Reasignador :8080]
     end
 
-    subgraph pool=infra [Grupo: pool=infra]
+    subgraph infra_pool [Grupo: sobel/infra=true]
         RMQ[(RabbitMQ :15692)]
         RD[(Redis :6379)]
         
@@ -38,7 +38,11 @@ flowchart TD
     GRAF -->|Consulta PromQL| PROM
 ```
 
-* **Aislamiento de Carga:** El scraping y procesamiento de métricas no consume memoria ni ciclos de CPU en los nodos donde se realiza el procesamiento intensivo de imágenes (`pool=apps`).
+* **Aislamiento de Carga:** El scraping y procesamiento de métricas no consume memoria ni ciclos de CPU en los nodos donde se realiza el procesamiento intensivo de imágenes (`sobel/apps=true`).
+* **En k3s local:** Para que un único nodo corra ambos grupos sin quedar en `Pending`, se aplican ambas etiquetas:
+  ```bash
+  kubectl label nodes $(kubectl get nodes -o jsonpath='{.items[0].metadata.name}') sobel/infra=true sobel/apps=true --overwrite
+  ```
 
 ---
 

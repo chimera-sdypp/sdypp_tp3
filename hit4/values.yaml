@@ -2,7 +2,7 @@
 # Values para kube-prometheus-stack (Helm Chart) — Hit #4: Observabilidad
 # ==============================================================================
 # Configura el stack de observabilidad (Prometheus, Grafana y Alertmanager)
-# anclado estrictamente al pool de infraestructura (pool=infra).
+# anclado estrictamente al pool de infraestructura (sobel/infra=true).
 # ==============================================================================
 
 defaultRules:
@@ -44,11 +44,11 @@ prometheus:
 
     # Segmentación en el grupo de nodos de infraestructura
     nodeSelector:
-      pool: infra
+      sobel/infra: "true"
     tolerations:
-      - key: "pool"
+      - key: "sobel/infra"
         operator: "Equal"
-        value: "infra"
+        value: "true"
         effect: "NoSchedule"
 
     resources:
@@ -71,11 +71,11 @@ grafana:
   
   # Segmentación en el pool de infraestructura
   nodeSelector:
-    pool: infra
+    sobel/infra: "true"
   tolerations:
-    - key: "pool"
+    - key: "sobel/infra"
       operator: "Equal"
-      value: "infra"
+      value: "true"
       effect: "NoSchedule"
 
   resources:
@@ -103,11 +103,11 @@ alertmanager:
   enabled: true
   alertmanagerSpec:
     nodeSelector:
-      pool: infra
+      sobel/infra: "true"
     tolerations:
-      - key: "pool"
+      - key: "sobel/infra"
         operator: "Equal"
-        value: "infra"
+        value: "true"
         effect: "NoSchedule"
     resources:
       requests:
@@ -129,9 +129,9 @@ nodeExporter:
 kubeStateMetrics:
   enabled: true
   nodeSelector:
-    pool: infra
+    sobel/infra: "true"
   tolerations:
-    - key: "pool"
+    - key: "sobel/infra"
       operator: "Equal"
-      value: "infra"
+      value: "true"
       effect: "NoSchedule"
