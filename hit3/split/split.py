@@ -8,6 +8,10 @@ import time
 from comun import colas, conexion, pixeles, registro
 
 
+# Cada una mira los 8 vecinos de cada píxel (kernel 3×3): suma una fila de borde por lado (contrato §10).
+OPERACIONES_DE_VECINDAD = {"sobel", "blur"}
+
+
 def ahora_en_ms():
     return int(time.time() * 1000)
 
@@ -20,10 +24,11 @@ def manejador(redis, partes, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.sp
         job_id = json.loads(cuerpo)["job_id"]
         job = f"job:{job_id}"
         operaciones = json.loads(redis.hget(job, "operaciones"))
+        bordes = sum(paso["operacion"] in OPERACIONES_DE_VECINDAD for paso in operaciones)
         tareas = []
         for archivo in range(int(redis.hget(job, "archivos"))):
             matriz = pixeles.leer_rgb(redis.get(f"{job}:entrada:{archivo}"))
-            fragmentos = pixeles.dividir(matriz, partes)
+            fragmentos = pixeles.dividir(matriz, partes, bordes)
             geometria = {"total": len(fragmentos)}
             for f, (franja, extra, filas) in enumerate(fragmentos):
                 redis.set(f"{job}:frag:{archivo}:{f}:0", pixeles.a_png(franja))

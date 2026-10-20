@@ -100,3 +100,40 @@ def test_un_png_con_alfa_se_reparte_en_rgb_sin_el_canal_alfa(redis):
     split.manejador(redis, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     np.testing.assert_array_equal(reconstruir(redis, "j1", 0), con_alfa[:, :, :3])
+
+
+def cadena(*operaciones):
+    return [{"operacion": op, "imagen": IMAGEN} for op in operaciones]
+
+
+# 10 filas en 4 partes: límites 0, 2, 5, 7, 10. Cada operación de vecindad suma una fila de borde por lado,
+# salvo donde la imagen se termina (arriba del primer fragmento y abajo del último).
+@pytest.mark.parametrize("operaciones, geometria, altos", [
+    (cadena("grises"), {"0": "0,2", "1": "0,3", "2": "0,2", "3": "0,3"}, [2, 3, 2, 3]),
+    (cadena("sobel"), {"0": "0,2", "1": "1,3", "2": "1,2", "3": "1,3"}, [3, 5, 4, 4]),
+    (cadena("blur", "sobel"), {"0": "0,2", "1": "2,3", "2": "2,2", "3": "2,3"}, [4, 7, 6, 5]),
+    (cadena("grises", "blur"), {"0": "0,2", "1": "1,3", "2": "1,2", "3": "1,3"}, [3, 5, 4, 4]),
+])
+def test_cada_fragmento_lleva_una_fila_de_borde_por_operacion_de_vecindad(redis, operaciones, geometria, altos):
+    original = imagen_rgb(10, 6)
+    cargar_job(redis, "j1", [png(original)], operaciones)
+
+    split.manejador(redis, partes=4)(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    guardada = {k.decode(): v.decode() for k, v in redis.hgetall("job:j1:geometria:0").items()}
+    assert guardada == {"total": "4", **geometria}
+    fragmentos = [Image.open(io.BytesIO(redis.get(f"job:j1:frag:0:{f}:0"))) for f in range(4)]
+    assert [f.height for f in fragmentos] == altos
+    np.testing.assert_array_equal(reconstruir(redis, "j1", 0), original)
+
+
+def test_una_imagen_con_menos_filas_que_partes_da_un_fragmento_por_fila(redis):
+    original = imagen_rgb(2, 5)
+    cargar_job(redis, "j1", [png(original)], cadena("sobel"))
+    canal = CanalQuePublica()
+
+    split.manejador(redis, partes=4)(canal, b'{"job_id": "j1"}')
+
+    assert redis.hget("job:j1:geometria:0", "total") == b"2"
+    assert sum(evento[0] == "publicar" for evento in canal.eventos) == 2
+    np.testing.assert_array_equal(reconstruir(redis, "j1", 0), original)
