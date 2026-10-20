@@ -78,7 +78,9 @@ spec:
             - name: SOBEL_IMAGENES_PERMITIDAS
               value: "ghcr.io/chimera-sdypp/sobel-worker:1.0.0,ghcr.io/chimera-sdypp/grises-worker:1.0.0,ghcr.io/chimera-sdypp/blur-worker:1.0.0"
             - name: SOBEL_SERVICIOS
-              value: "backend=http://backend:8080,split=http://split:8080,joiner=http://joiner:8080,reasignador=http://reasignador:8080,frontend=http://frontend:8080"
+              value: "split=http://split:8080/health,joiner=http://joiner:8080/health,reasignador=http://reasignador:8080/health,frontend=http://frontend:8080/health"
+            - name: SOBEL_LIMITE_ENTREGAS
+              value: "3"
           resources:
             requests:
               cpu: 100m

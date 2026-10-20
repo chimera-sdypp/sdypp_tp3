@@ -66,6 +66,8 @@ spec:
                   key: REDIS_URL
             - name: SOBEL_PUERTO
               value: "8080"
+            - name: SOBEL_LIMITE_ENTREGAS
+              value: "3"
           resources:
             requests:
               cpu: 100m

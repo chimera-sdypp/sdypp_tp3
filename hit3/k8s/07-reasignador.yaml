@@ -68,6 +68,8 @@ spec:
               value: "8080"
             - name: SOBEL_REINTENTOS_MAX
               value: "3"
+            - name: SOBEL_LIMITE_ENTREGAS
+              value: "3"
           resources:
             requests:
               cpu: 100m

@@ -75,6 +75,8 @@ spec:
               value: "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
             - name: SOBEL_TIMEOUT
               value: "60"
+            - name: SOBEL_LIMITE_ENTREGAS
+              value: "3"
           resources:
             requests:
               cpu: 150m
@@ -174,6 +176,8 @@ spec:
               value: "ghcr.io/chimera-sdypp/grises-worker:1.0.0"
             - name: SOBEL_TIMEOUT
               value: "60"
+            - name: SOBEL_LIMITE_ENTREGAS
+              value: "3"
           resources:
             requests:
               cpu: 100m
