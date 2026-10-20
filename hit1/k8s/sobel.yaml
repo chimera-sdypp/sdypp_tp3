@@ -1,0 +1,48 @@
+# Etapa 2 sobre k3s: N workers detrás de un Service headless. El master no está acá:
+# se corre por pedido con `kubectl run` (ver hit1/README.md).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sobel
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sobel-worker
+  namespace: sobel
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: sobel-worker
+  template:
+    metadata:
+      labels:
+        app: sobel-worker
+        rol: sobel-worker                # el Service selecciona por rol (ver k8s/fallas.yaml)
+    spec:
+      containers:
+        - name: worker
+          image: sobel-hit1:local          # importada con `k3s ctr images import`
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          readinessProbe:                  # sólo los pods listos aparecen en el DNS
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 5
+---
+# Headless: el DNS de sobel-worker devuelve la IP de cada pod, no una IP virtual.
+# Así el master ve a todos los workers y reparte él, igual que en Compose.
+apiVersion: v1
+kind: Service
+metadata:
+  name: sobel-worker
+  namespace: sobel
+spec:
+  clusterIP: None
+  selector:
+    rol: sobel-worker                    # incluye a los workers con fallas de k8s/fallas.yaml
+  ports:
+    - port: 8080

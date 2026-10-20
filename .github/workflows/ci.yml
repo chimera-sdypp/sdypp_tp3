@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gitleaks:
+    name: Detección de secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Binario y no gitleaks-action, que en repos de organizaciones pide licencia.
+      - name: Escanear secrets con gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar -xz gitleaks
+          ./gitleaks git --redact -v .
+
+  hit1:
+    name: Hit 1 — Sobel (tests, integración y tolerancia a fallos con Docker)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Compilar
+        run: python -m compileall -q *.py tests
+      - name: Tests unitarios y master + workers en hilos
+        run: python -m pytest -v
+      - name: Integración con Docker (3 workers)
+        run: PYTHON=python bash tests/integracion.sh
+      - name: Tolerancia a fallos con Docker (worker caído, colgado y docker kill)
+        run: PYTHON=python bash tests/tolerancia.sh
+
+  hit3:
+    name: Hit 3 — comun (conexión con backoff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit3/comun
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Tests unitarios
+        run: python -m pytest -v
