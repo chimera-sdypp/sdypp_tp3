@@ -209,8 +209,12 @@ def test_un_archivo_que_pasa_el_doble_del_limite_de_pillow_tambien_deja_el_job_e
 
 
 def foto(redis):
-    """Todo lo que hay en Redis, para comparar antes y después."""
-    return {clave: redis.dump(clave) for clave in redis.keys("*")}
+    """Todo lo que hay en Redis (contenido y TTL), para comparar antes y después.
+
+    No usa DUMP: en un Redis real, el orden interno de un hash grande cambia con las lecturas (rehash).
+    """
+    leer = {b"string": redis.get, b"hash": redis.hgetall, b"list": lambda c: redis.lrange(c, 0, -1)}
+    return {clave: (leer[redis.type(clave)](clave), redis.ttl(clave)) for clave in redis.keys("*")}
 
 
 @pytest.mark.parametrize("estado, con_entradas", [
@@ -286,3 +290,36 @@ def test_la_geometria_y_los_fragmentos_vencen_con_el_ttl(redis, archivos):
     escritas = redis.keys("job:j1:frag:*") + redis.keys("job:j1:geometria:*")
     assert escritas
     assert {clave: redis.ttl(clave) for clave in escritas} == {clave: 3600 for clave in escritas}
+
+
+class CanalConJoinerRapido(CanalQuePublica):
+    """Con la última tarea publicada, el job ya termina (workers y joiner más rápidos que el split)."""
+
+    def __init__(self, redis, tareas):
+        super().__init__()
+        self.redis, self.tareas = redis, tareas
+
+    def basic_publish(self, exchange, routing_key, body, properties=None):
+        super().basic_publish(exchange, routing_key, body, properties)
+        if sum(e[0] == "publicar" for e in self.eventos) == self.tareas:
+            self.redis.hset(f"job:{json.loads(body)['job_id']}", "estado", "done")
+
+
+def test_si_el_job_termina_mientras_se_publica_el_split_no_pisa_done(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(6, 4))])
+
+    split.manejador(redis, partes=2, ahora_ms=reloj(1000, 1300))(CanalConJoinerRapido(redis, 2), b'{"job_id": "j1"}')
+
+    assert redis.hget("job:j1", "estado") == b"done"
+    assert redis.hget("job:j1", "fragmentos_total") == b"2"
+    assert redis.hget("job:j1", "t_split_ms") == b"300"
+    assert redis.keys("job:j1:entrada:*") == []
+
+
+def test_un_job_failed_tambien_borra_las_entradas(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(6, 4)), b"no soy una imagen"])
+
+    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    assert redis.hget("job:j1", "estado") == b"failed"
+    assert redis.keys("job:j1:entrada:*") == []
