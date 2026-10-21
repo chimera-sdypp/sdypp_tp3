@@ -4,6 +4,7 @@ import threading
 import time
 
 import pytest
+import redis as redis_py
 
 from comun import conexion
 from frontend.app import Difusor, crear_app
@@ -94,6 +95,16 @@ def test_ofertas_junta_las_operaciones_de_los_workers_activos(cliente, redis):
     redis.set("otra", "cosa")
     assert cliente.get("/ofertas").json()["contenido"]["ofertas"] == {
         "r/w:1": ["blur", "grises", "sobel"], "r/w:2": ["sobel"]}
+
+
+def test_ofertas_sin_redis_es_503(cliente, redis, monkeypatch):
+    def caido(*args, **kwargs):
+        raise redis_py.exceptions.ConnectionError("sin redis")
+    monkeypatch.setattr(redis, "scan_iter", caido)
+    respuesta = cliente.get("/ofertas")
+    assert respuesta.status_code == 503
+    assert respuesta.headers["Retry-After"] == "5"
+    assert respuesta.json()["contenido"]["error"]["tipo"] == "SERVICIO_NO_DISPONIBLE"
 
 
 def test_health(cliente, monkeypatch):

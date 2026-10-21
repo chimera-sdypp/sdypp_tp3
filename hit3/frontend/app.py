@@ -97,8 +97,7 @@ def crear_app(entorno=None, redis=None, difusor=None, escuchar=True):
         except OSError as error:
             log.warning("el backend no responde (%r)", error)
             ERRORES.labels("frontend", "BACKEND_CAIDO").inc()
-            return 503, json.dumps({"codigo": 503, "contenido": {"error": {
-                "tipo": "SERVICIO_NO_DISPONIBLE", "mensaje": "el backend no responde", "detalles": []}}}).encode()
+            return 503, json.dumps(_no_disponible("el backend no responde")).encode()
 
     @app.get("/")
     def pagina():
@@ -131,12 +130,18 @@ def crear_app(entorno=None, redis=None, difusor=None, escuchar=True):
     def ofertas():
         """{imagen: [operaciones]} de los workers activos (contrato §10), para armar los pasos en la página."""
         resultado = {}
-        for clave in redis.scan_iter(match="worker:*", count=100):
-            datos = redis.hgetall(clave)
-            imagen = datos.get(b"imagen", b"").decode()
-            if imagen:
-                resultado.setdefault(imagen, set()).update(
-                    o for o in datos.get(b"operaciones", b"").decode().split(",") if o)
+        try:
+            for clave in redis.scan_iter(match="worker:*", count=100):
+                datos = redis.hgetall(clave)
+                imagen = datos.get(b"imagen", b"").decode()
+                if imagen:
+                    resultado.setdefault(imagen, set()).update(
+                        o for o in datos.get(b"operaciones", b"").decode().split(",") if o)
+        except (redis_py.exceptions.ConnectionError, redis_py.exceptions.TimeoutError) as error:
+            log.warning("redis no responde (%r)", error)
+            ERRORES.labels("frontend", "REDIS_CAIDO").inc()
+            return JSONResponse(_no_disponible("no se pueden leer los workers activos"), 503,
+                                headers={"Retry-After": "5"})
         return {"codigo": 200, "contenido": {"ofertas": {i: sorted(o) for i, o in sorted(resultado.items())}}}
 
     @app.get("/health")
@@ -181,6 +186,12 @@ def _escuchar(url, difusor, log):
 
     conexion.consumir(None, recibir, al_conectar=al_conectar, prefetch=100,
                       conectar=lambda: conexion.conectar_rabbitmq(url, log=log), log=log)
+
+
+def _no_disponible(mensaje):
+    """El sobre del error 503 del contrato (§6)."""
+    return {"codigo": 503, "contenido": {"error": {"tipo": "SERVICIO_NO_DISPONIBLE", "mensaje": mensaje,
+                                                   "detalles": []}}}
 
 
 def _obligatoria(entorno, nombre):

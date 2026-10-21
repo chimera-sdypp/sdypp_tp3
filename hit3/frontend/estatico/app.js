@@ -64,7 +64,7 @@ async function salud() {
 
 async function cargarOfertas() {
   try {
-    ofertas = (await (await fetch("/ofertas")).json()).contenido.ofertas;
+    ofertas = (await (await fetch("/ofertas")).json()).contenido.ofertas ?? {}; // un 503 no trae ofertas
   } catch {
     ofertas = {};
   }
