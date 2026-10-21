@@ -21,8 +21,8 @@ spec:
             severity: warning
             app: sobel
           annotations:
-            summary: "Cola {{ $labels.queue }} saturada en RabbitMQ"
-            description: "La cola {{ $labels.queue }} acumula {{ $value }} mensajes pendientes durante más de 1 minuto, superando el umbral de procesamiento normal (50 mensajes)."
+            summary: "Cola {{ or $labels.queue $labels.cola \"desconocida\" }} saturada en RabbitMQ"
+            description: "La cola {{ or $labels.queue $labels.cola \"desconocida\" }} acumula {{ $value }} mensajes pendientes durante más de 1 minuto, superando el umbral de procesamiento normal (50 mensajes)."
 
         # ----------------------------------------------------------------------
         # 2. Alerta: Worker que no responde o sin réplicas disponibles
@@ -37,8 +37,8 @@ spec:
             severity: critical
             app: sobel
           annotations:
-            summary: "Worker {{ $labels.deployment }} sin réplicas activas o caído"
-            description: "El servicio de procesamiento de workers {{ $labels.deployment }} no tiene réplicas disponibles o falló su healthcheck durante más de 30 segundos."
+            summary: "Worker {{ or $labels.deployment $labels.job \"worker\" }} sin réplicas activas o caído"
+            description: "El servicio de procesamiento de workers {{ or $labels.deployment $labels.job \"worker\" }} no tiene réplicas disponibles o falló su healthcheck durante más de 30 segundos."
 
         # ----------------------------------------------------------------------
         # 3. Alerta: Mensajes agotados en la Dead Letter Queue (DLQ)
