@@ -142,3 +142,55 @@ jobs:
         run: python -m pytest -v comun
       - name: Tests del split
         run: python -m pytest -v split
+
+  # Sólo al mergear a dev o a main, o con un tag v*: los PR prueban pero no publican.
+  servicios:
+    name: Servicios con imagen
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [gitleaks, hit1, hit3, hit3-backend, hit3-frontend]
+    runs-on: ubuntu-latest
+    outputs:
+      lista: ${{ steps.buscar.outputs.lista }}
+    steps:
+      - uses: actions/checkout@v4
+      # Cada carpeta de hit3/ con Dockerfile es un servicio: los que se agreguen se publican solos.
+      - id: buscar
+        run: echo "lista=$(ls hit3/*/Dockerfile | cut -d/ -f2 | jq -Rnc '[inputs]')" >> "$GITHUB_OUTPUT"
+
+  imagenes:
+    name: Imagen ${{ matrix.servicio }} a GHCR
+    needs: servicios
+    runs-on: ubuntu-latest
+    # El GITHUB_TOKEN vence al terminar el job: no hay credenciales del registry guardadas en el repo.
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        servicio: ${{ fromJSON(needs.servicios.outputs.lista) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # dev / main → :dev / :main; tag v1.0.0 → :1.0.0 (el que usan los manifiestos); siempre :sha-<commit>.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sobel-${{ matrix.servicio }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: hit3
+          file: hit3/${{ matrix.servicio }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.servicio }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.servicio }}
