@@ -60,8 +60,10 @@ esperar "usuario en POST /admin/dlq/reprocesar" 403 "$(pedir POST /admin/dlq/rep
 esperar "admin en GET /stats" 200 "$(pedir GET /stats "$admin")"
 
 echo "== Jobs de otro usuario"
-esperar "ana crea un job" 202 "$(pedir POST /jobs "$ana" -F "archivos=@$PNG" \
-  -F "operaciones=[{\"operacion\":\"sobel\",\"imagen\":\"$IMAGEN\"}]")"
+creado=$(pedir POST /jobs "$ana" -F "archivos=@$PNG" -F "operaciones=[{\"operacion\":\"sobel\",\"imagen\":\"$IMAGEN\"}]")
+esperar "ana crea un job" 202 "$creado"
+# Sin job no hay nada que consultar: con SIN_WORKERS falta desplegar un worker de $IMAGEN.
+[ "$creado" = 202 ] || { echo "R4: no se pudo crear el job, corto acá"; exit 1; }
 job=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["contenido"]["job_id"])' "$CUERPO")
 esperar "ana ve su job" 200 "$(pedir GET "/jobs/$job" "$ana")"
 esperar "beto pide el job de ana" 404 "$(pedir GET "/jobs/$job" "$beto")"
