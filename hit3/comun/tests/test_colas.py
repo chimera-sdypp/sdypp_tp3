@@ -92,3 +92,16 @@ def test_publicar_al_fanout_de_resultados_con_las_mismas_propiedades():
     assert (exchange, routing_key) == ("sobel.resultados", "")
     assert json.loads(cuerpo) == {"job_id": "3f6c2a9e", "fragmento": 3}
     assert (propiedades.content_type, propiedades.delivery_mode) == ("application/json", 2)
+
+
+def test_declarar_exclusiva_ata_una_cola_con_nombre_del_broker_al_fanout():
+    class Canal(CanalQueRegistra):
+        def queue_declare(self, queue, exclusive=False, auto_delete=False):
+            self.pedido = (queue, exclusive, auto_delete)
+            return type("Respuesta", (), {"method": type("Metodo", (), {"queue": "amq.gen-abc"})})
+
+    canal = Canal()
+
+    assert colas.declarar_exclusiva(canal) == "amq.gen-abc"
+    assert canal.pedido == ("", True, True)
+    assert canal.ataduras == {("amq.gen-abc", "sobel.resultados", "")}

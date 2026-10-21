@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sobel distribuido</title>
+  <link rel="stylesheet" href="/estatico/estilo.css">
+  <script src="/estatico/app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>Sobel distribuido</h1>
+  <ul id="salud" aria-label="Estado de los servicios"></ul>
+</header>
+
+<main>
+  <section>
+    <h2>Token</h2>
+    <form id="form-token">
+      <input id="token" type="password" placeholder="Bearer: lo emite backend/emitir_token.py" autocomplete="off">
+      <button>Usar</button>
+    </form>
+    <p id="quien" class="nota"></p>
+  </section>
+
+  <section>
+    <h2>Nuevo job</h2>
+    <form id="form-job">
+      <label>Imágenes (PNG o JPEG, hasta 50)
+        <input id="archivos" type="file" accept="image/png,image/jpeg" multiple required>
+      </label>
+      <fieldset>
+        <legend>Operaciones, en orden</legend>
+        <ol id="pasos"></ol>
+        <button type="button" id="agregar-paso">+ paso</button>
+      </fieldset>
+      <button id="enviar">Enviar</button>
+      <p id="error-job" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="vista" hidden>
+    <h2>Job <code id="job-id"></code> <span id="estado" class="estado"></span></h2>
+    <div class="barra"><div id="avance"></div></div>
+    <p id="resumen" class="nota"></p>
+    <div id="fragmentos" aria-label="Fragmentos: cada color es un worker"></div>
+    <ul id="leyenda"></ul>
+    <p id="error-vista" class="error" role="alert"></p>
+    <div id="resultados"></div>
+    <details>
+      <summary>Últimos resultados que llegaron por <code>sobel.resultados</code></summary>
+      <ol id="avisos" reversed></ol>
+    </details>
+  </section>
+
+  <section>
+    <h2>Mis jobs <button type="button" id="refrescar" class="chico">refrescar</button></h2>
+    <ul id="jobs"></ul>
+  </section>
+</main>
+</body>
+</html>

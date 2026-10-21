@@ -43,6 +43,16 @@ def declarar_tareas(canal, imagen_worker):
     return cola
 
 
+def declarar_exclusiva(canal):
+    """Declara la cola del frontend: exclusiva, con nombre de RabbitMQ y atada a sobel.resultados.
+
+    Hay una por réplica y se borra sola al cortarse la conexión. Devuelve el nombre, para `consumir`.
+    """
+    cola = canal.queue_declare("", exclusive=True, auto_delete=True).method.queue
+    canal.queue_bind(cola, RESULTADOS, routing_key="")
+    return cola
+
+
 def publicar(canal, cola, mensaje, *, exchange=""):
     """Publica `mensaje` como JSON persistente (§9); con confirms, vuelve cuando el broker lo aceptó.
 
