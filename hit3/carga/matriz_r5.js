@@ -23,7 +23,7 @@ const invalidRequestsHandled = new Counter('invalid_requests_handled');
 // ============================================================================
 // Parámetros y Dimensiones de la Matriz R5 (vía variables de entorno)
 // ============================================================================
-const TARGET_URL = __ENV.TARGET_URL || 'http://localhost:8080';
+const TARGET_URL = __ENV.TARGET_URL || 'http://localhost';
 const VA = parseInt(__ENV.VA || '1', 10);          // Archivos por job: 1, 10, 50
 const VB = parseInt(__ENV.VB || '1', 10);          // Operaciones por archivo: 1, 2, 3
 const VC = parseInt(__ENV.VC || '1', 10);          // Concurrencia (VUs): 1, 10, 50
@@ -142,22 +142,48 @@ export default function () {
     return;
   }
 
-  // Caso 2: Operación no soportada o archivo corrupto (5% de probabilidad) -> debe responder 422
-  if (rand >= 0.05 && rand < 0.10 && imgCorrupta) {
+  // Caso 2: Operación no soportada con archivo válido (4% de probabilidad) -> debe responder 422 OPERACION_NO_SOPORTADA
+  if (rand >= 0.05 && rand < 0.09 && imgBytes) {
     const payload = {
-      operaciones: construirOperaciones(VB, true),
+      operaciones: JSON.stringify([{ operacion: 'rotar_invalida', imagen: DEFAULT_IMAGE_REF }]),
+      archivos: http.file(imgBytes, 'test.png', 'image/png'),
+    };
+    const params = {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      tags: { tipo: 'caso_op_invalida' },
+    };
+    const res = http.post(`${TARGET_URL}/jobs`, payload, params);
+    const is422 = res.status === 422;
+    check(res, {
+      'Operación inválida recibe 422': () => is422,
+    });
+    if (is422) {
+      invalidRequestsHandled.add(1);
+    } else {
+      sloErrors.add(1);
+    }
+    sleep(1);
+    return;
+  }
+
+  // Caso 3: Archivo corrupto con operaciones válidas (4% de probabilidad) -> debe responder 422 ARCHIVO_INVALIDO
+  if (rand >= 0.09 && rand < 0.13 && imgCorrupta) {
+    const payload = {
+      operaciones: construirOperaciones(VB, false),
       archivos: http.file(imgCorrupta, 'corrupta.png', 'image/png'),
     };
     const params = {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      tags: { tipo: 'caso_invalido' },
+      tags: { tipo: 'caso_archivo_corrupto' },
     };
     const res = http.post(`${TARGET_URL}/jobs`, payload, params);
     const is422 = res.status === 422;
     check(res, {
-      'Caso inválido recibe 422': () => is422,
+      'Archivo corrupto recibe 422': () => is422,
     });
     if (is422) {
       invalidRequestsHandled.add(1);
