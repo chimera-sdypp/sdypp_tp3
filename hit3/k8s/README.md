@@ -60,6 +60,7 @@ El script genera automáticamente el Secret `sobel-secretos` en el namespace `so
 - `REDIS_PASS` generado aleatoriamente y `REDIS_URL` (`redis://:<pass>@redis.sobel.svc.cluster.local:6379/0`).
 - `SOBEL_SECRETO` (clave criptográfica de 32 caracteres para tokens JWT HS256).
 - Copia local de respaldo en `.env.secrets` (con permisos `600`, ignorado por `.gitignore`).
+- Si `sobel-secretos` ya existe, reusa sus valores: volver a correrlo no cambia las claves (RabbitMQ toma su usuario sólo al crear el volumen).
 
 *(Opcional)* Si desea descargar imágenes privadas de GitHub Container Registry (`ghcr.io`), defina las variables antes de correr el script:
 ```bash

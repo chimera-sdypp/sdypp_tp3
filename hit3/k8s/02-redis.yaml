@@ -55,6 +55,12 @@ spec:
                 secretKeyRef:
                   name: sobel-secretos
                   key: REDIS_PASS
+            # redis-cli la lee sola: así la clave no queda en los argumentos de las probes
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: sobel-secretos
+                  key: REDIS_PASS
           command:
             - sh
             - -c
@@ -75,18 +81,16 @@ spec:
           readinessProbe:
             exec:
               command:
-                - sh
-                - -c
-                - redis-cli --no-auth-warning -a "$REDIS_PASS" ping
+                - redis-cli
+                - ping
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
             exec:
               command:
-                - sh
-                - -c
-                - redis-cli --no-auth-warning -a "$REDIS_PASS" ping
+                - redis-cli
+                - ping
             initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 3

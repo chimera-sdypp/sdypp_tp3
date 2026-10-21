@@ -25,20 +25,30 @@ generar_clave() {
 echo "==> Verificando existencia del namespace '${NAMESPACE}'..."
 kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl apply -f "$DIR_SCRIPT/00-namespace.yaml"
 
+# Si el Secret ya existe se reusan sus valores: RabbitMQ toma RABBITMQ_DEFAULT_USER/PASS sólo la primera vez
+# (con el PVC vacío) y los JWT ya emitidos se firmaron con el SOBEL_SECRETO viejo.
+existente() {
+  kubectl get secret sobel-secretos --namespace="${NAMESPACE}" -o "jsonpath={.data.$1}" 2>/dev/null | base64 -d || true
+}
+
 # 1. RabbitMQ: Usuario y contraseña seguros
+RABBITMQ_USER="${RABBITMQ_USER:-$(existente RABBITMQ_USER)}"
 RABBITMQ_USER="${RABBITMQ_USER:-sobel_admin}"
+RABBITMQ_PASS="${RABBITMQ_PASS:-$(existente RABBITMQ_PASS)}"
 RABBITMQ_PASS="${RABBITMQ_PASS:-$(generar_clave 24)}"
 RABBITMQ_HOST="${RABBITMQ_HOST:-rabbitmq.${NAMESPACE}.svc.cluster.local}"
 RABBITMQ_PORT="${RABBITMQ_PORT:-5672}"
 RABBITMQ_URL="amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@${RABBITMQ_HOST}:${RABBITMQ_PORT}/"
 
 # 2. Redis: Contraseña segura requerida
+REDIS_PASS="${REDIS_PASS:-$(existente REDIS_PASS)}"
 REDIS_PASS="${REDIS_PASS:-$(generar_clave 24)}"
 REDIS_HOST="${REDIS_HOST:-redis.${NAMESPACE}.svc.cluster.local}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 REDIS_URL="redis://:${REDIS_PASS}@${REDIS_HOST}:${REDIS_PORT}/0"
 
 # 3. JWT HS256: Secreto de alta entropía para firma de tokens
+SOBEL_SECRETO="${SOBEL_SECRETO:-$(existente SOBEL_SECRETO)}"
 SOBEL_SECRETO="${SOBEL_SECRETO:-$(generar_clave 32)}"
 
 echo "==> Creando/actualizando Kubernetes Secret 'sobel-secretos' en namespace '${NAMESPACE}'..."
