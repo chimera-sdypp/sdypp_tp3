@@ -77,6 +77,7 @@ let imgBytes;
 try {
   imgBytes = open(`./datos/img_${V1}.png`, 'b');
 } catch (_) {
+  console.warn(`[ADVERTENCIA] No se encontró ./datos/img_${V1}.png. Reintentando con img_1kb.png. Ejecutar 'python3 generar_datos.py' para calibrar todos los tamaños.`);
   try {
     imgBytes = open('./datos/img_1kb.png', 'b');
   } catch (err) {

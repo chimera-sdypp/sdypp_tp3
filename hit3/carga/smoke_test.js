@@ -15,7 +15,7 @@ export const options = {
   },
 };
 
-const BASE_URL = __ENV.TARGET_URL || 'http://localhost:8080';
+const BASE_URL = __ENV.TARGET_URL || 'http://localhost';
 const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.0.0';
 
 // Carga de archivo de tokens e imágenes

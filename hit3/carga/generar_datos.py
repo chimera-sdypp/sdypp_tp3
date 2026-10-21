@@ -113,13 +113,19 @@ def generar_imagenes():
     Image.fromarray(arr_10m).save(path_10m, format="PNG")
     print(f"[OK] Creada {path_10m.name} ({path_10m.stat().st_size / 1024 / 1024:.2f} MB)")
 
-    # 4. Imagen corrupta (bytes aleatorios con extensión .png pero sin cabecera PNG)
+    # 4. Imagen ~50 MB (4150x4150 con ruido RGB, compresión nivel 1 para velocidad)
+    path_50m = DIR_DATOS / "img_50mb.png"
+    arr_50m = np.random.randint(0, 256, (4150, 4150, 3), dtype=np.uint8)
+    Image.fromarray(arr_50m).save(path_50m, format="PNG", compress_level=1)
+    print(f"[OK] Creada {path_50m.name} ({path_50m.stat().st_size / 1024 / 1024:.2f} MB)")
+
+    # 5. Imagen corrupta (bytes aleatorios con extensión .png pero sin cabecera PNG)
     path_corrupta = DIR_DATOS / "corrupta.png"
     with open(path_corrupta, "wb") as f:
         f.write(b"NOT_A_PNG_FILE_HEADER_" + os.urandom(1024))
     print(f"[OK] Creada {path_corrupta.name} (archivo inválido/corrupto)")
 
-    # 5. Archivo de texto plano (para caso tipo de contenido inválido)
+    # 6. Archivo de texto plano (para caso tipo de contenido inválido)
     path_txt = DIR_DATOS / "no_imagen.txt"
     with open(path_txt, "w", encoding="utf-8") as f:
         f.write("Este no es un archivo de imagen válido.")

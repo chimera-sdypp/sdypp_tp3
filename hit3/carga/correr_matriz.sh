@@ -10,14 +10,14 @@ DIR_DATOS="$DIR_SCRIPT/datos"
 DIR_RESULTADOS="$DIR_SCRIPT/resultados"
 mkdir -p "$DIR_RESULTADOS"
 
-TARGET_URL="${TARGET_URL:-http://localhost:8080}"
+TARGET_URL="${TARGET_URL:-http://localhost}"
 DURATION="${DURATION:-30s}"
 RAMP_UP="${RAMP_UP:-5s}"
 WORKER_COUNT="${V3:-2}"
 
 # 1. Verificar o generar datos sintéticos
 asegurar_datos() {
-  if [ ! -f "$DIR_DATOS/tokens.json" ] || [ ! -f "$DIR_DATOS/img_1mb.png" ]; then
+  if [ ! -f "$DIR_DATOS/tokens.json" ] || [ ! -f "$DIR_DATOS/img_1mb.png" ] || [ ! -f "$DIR_DATOS/img_50mb.png" ]; then
     echo "--- [1/3] Generando datos de prueba sintéticos ---"
     python3 "$DIR_SCRIPT/generar_datos.py"
   else
