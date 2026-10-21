@@ -109,19 +109,32 @@ if [ "$HACER_DEPLOY" -eq 1 ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 3. Verificación de disponibilidad de la API Gateway (/health)
+# 3. Verificación de disponibilidad de la API Gateway y Workers (/health)
 # ------------------------------------------------------------------------------
 echo ""
 echo "🔍 Paso 2: Verificando disponibilidad de la API Gateway en $URL/health..."
-reintentos=15
+reintentos=20
 salud_ok=0
+workers_listos=0
+
 while [ "$reintentos" -gt 0 ]; do
+  resp_health=$(curl -s "$URL/health" 2>/dev/null || true)
   codigo=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" 2>/dev/null || true)
+  
   if [ "$codigo" = "200" ]; then
     salud_ok=1
-    break
+    # Verificar si los workers están registrados
+    w_status=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('contenido',{}).get('workers','desconocido'))" "$resp_health" 2>/dev/null || echo "desconocido")
+    if [ "$w_status" = "ok" ]; then
+      workers_listos=1
+      echo "   ✅ API Gateway (200 OK) y Workers activos (estado: ok)."
+      break
+    else
+      echo "   ... backend online pero esperando registro de workers en Redis (workers: '$w_status', reintentos: $reintentos)"
+    fi
+  else
+    echo "   ... esperando backend en $URL/health (código: '$codigo', reintentos restantes: $reintentos)"
   fi
-  echo "   ... esperando backend en $URL/health (código recibido: '$codigo', reintentos restantes: $reintentos)"
   sleep 2
   reintentos=$((reintentos - 1))
 done
@@ -131,7 +144,10 @@ if [ "$salud_ok" -ne 1 ]; then
   echo "   Asegurate de que el cluster o el puerto forwarding esté activo (ej: kubectl port-forward -n $NAMESPACE svc/backend 8080:8080)" >&2
   exit 2
 fi
-echo "   ✅ API Gateway responde 200 OK en /health."
+
+if [ "$workers_listos" -ne 1 ]; then
+  echo "⚠️ Advertencia: No se detectaron workers activos en /health. Se continuará esperando en el envío del job."
+fi
 
 # ------------------------------------------------------------------------------
 # 4. Generación de Imagen Sintética y Referencia Centralizada (Hit #1)
@@ -142,19 +158,17 @@ IMG_ENTRADA="$TMP_DIR/entrada.png"
 IMG_CENTRAL="$TMP_DIR/salida_centralizada.png"
 IMG_DISTRIB="$TMP_DIR/salida_distribuida.png"
 
+# 1. Generar imagen sintética de 400x300 con gradientes y contrastes marcados
 python3 - <<EOF
 import numpy as np
 from PIL import Image
 
-# Generar imagen sintética de 400x300 con gradientes y contrastes marcados
 ancho, alto = 400, 300
 arr = np.zeros((alto, ancho), dtype=np.uint8)
 
-# Gradiente horizontal
 for x in range(ancho):
     arr[:, x] = int((x / ancho) * 200)
 
-# Rectángulos de alto contraste con bordes nítidos
 arr[50:120, 50:180] = 255
 arr[180:250, 220:350] = 30
 arr[100:220, 150:270] = 180
@@ -162,27 +176,21 @@ arr[100:220, 150:270] = 180
 img = Image.fromarray(arr, mode='L')
 img.save("$IMG_ENTRADA")
 print(f"   * Imagen sintética generada: {ancho}x{alto} px -> $IMG_ENTRADA")
-
-# Aplicar algoritmo canónico centralizado del Hit #1
-GX = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
-GY = GX.T
-
-p = np.pad(arr.astype(np.int32), 1, mode="edge")
-gx = np.zeros((alto, ancho), np.int32)
-gy = np.zeros((alto, ancho), np.int32)
-for i in range(3):
-    for j in range(3):
-        ventana = p[i:i + alto, j:j + ancho]
-        gx += GX[i, j] * ventana
-        gy += GY[i, j] * ventana
-
-sobel_central = np.clip(np.hypot(gx, gy), 0, 255).astype(np.uint8)
-Image.fromarray(sobel_central, mode='L').save("$IMG_CENTRAL")
-print(f"   * Salida centralizada Hit #1 calculada -> $IMG_CENTRAL")
 EOF
 
+# 2. Ejecutar directamente el script canónico centralizado del Hit #1
+if [ -f "$DIR_RAIZ/hit1/centralizado.py" ]; then
+  echo "   * Ejecutando algoritmo canónico de Hit #1: hit1/centralizado.py..."
+  PYTHONPATH="$DIR_RAIZ/hit1" SOBEL_LOGS="$TMP_DIR/logs_centralizado" \
+    python3 "$DIR_RAIZ/hit1/centralizado.py" "$IMG_ENTRADA" "$IMG_CENTRAL"
+  echo "   ✅ Salida canónica Hit #1 generada -> $IMG_CENTRAL"
+else
+  echo "❌ Error: No se encontró '$DIR_RAIZ/hit1/centralizado.py'." >&2
+  exit 2
+fi
+
 # ------------------------------------------------------------------------------
-# 5. Obtención de Token JWT
+# 5. Obtención de Token JWT (Sin dependencias externas, Python stdlib)
 # ------------------------------------------------------------------------------
 echo ""
 echo "🔑 Paso 4: Generando token JWT de autenticación..."
@@ -194,13 +202,36 @@ if [ -n "${SOBEL_TOKEN:-}" ]; then
   echo "   * Usando token provisto en \$SOBEL_TOKEN"
 fi
 
-# Intento 2: Archivo .env.secrets local
-if [ -z "$TOKEN" ] && [ -f "$DIR_RAIZ/.env.secrets" ]; then
-  secreto=$(grep -E '^SOBEL_SECRETO=' "$DIR_RAIZ/.env.secrets" | cut -d= -f2- | tr -d '"\r\n' || true)
-  if [ -n "$secreto" ] && [ -f "$DIR_RAIZ/hit3/backend/emitir_token.py" ]; then
-    TOKEN=$(SOBEL_SECRETO="$secreto" PYTHONPATH="$DIR_RAIZ/hit3" python3 -m backend.emitir_token "e2e_tester" "usuario" --horas 1 2>/dev/null || true)
+# Intento 2: Archivo .env.secrets local o variable de entorno SOBEL_SECRETO
+if [ -z "$TOKEN" ]; then
+  secreto="${SOBEL_SECRETO:-}"
+  if [ -z "$secreto" ] && [ -f "$DIR_RAIZ/.env.secrets" ]; then
+    secreto=$(grep -E '^SOBEL_SECRETO=' "$DIR_RAIZ/.env.secrets" | cut -d= -f2- | tr -d '"\r\n' || true)
+  fi
+
+  if [ -n "$secreto" ]; then
+    # Emisión pura con biblioteca estándar (hmac, hashlib, base64) para evitar dependencias de PyJWT en host
+    TOKEN=$(python3 - <<EOF
+import base64, hmac, hashlib, json, time, sys
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("utf-8")
+
+header = {"alg": "HS256", "typ": "JWT"}
+payload = {
+    "sub": "e2e_tester",
+    "role": "usuario",
+    "exp": int(time.time()) + 3600
+}
+h_str = b64url(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+p_str = b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+msg = f"{h_str}.{p_str}".encode("utf-8")
+sig = b64url(hmac.new("$secreto".encode("utf-8"), msg, hashlib.sha256).digest())
+sys.stdout.write(f"{h_str}.{p_str}.{sig}")
+EOF
+)
     if [ -n "$TOKEN" ]; then
-      echo "   * Token generado localmente con secreto de .env.secrets"
+      echo "   * Token JWT generado exitosamente con secreto de .env.secrets (HS256 stdlib)"
     fi
   fi
 fi
@@ -220,17 +251,32 @@ if [ -z "$TOKEN" ]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 6. Envío del Job Distribuido (POST /jobs)
+# 6. Envío del Job Distribuido (POST /jobs con reintentos si workers están iniciando)
 # ------------------------------------------------------------------------------
 echo ""
 echo "📤 Paso 5: Enviando job distribuido (POST /jobs)..."
 RESP_POST="$TMP_DIR/resp_post.json"
 OP_JSON="[{\"operacion\":\"sobel\",\"imagen\":\"$IMAGEN\"}]"
 
-CODIGO_POST=$(curl -s -w "%{http_code}" -o "$RESP_POST" -X POST "$URL/jobs" \
-  -H "Authorization: Bearer $TOKEN" \
-  -F "archivos=@$IMG_ENTRADA" \
-  -F "operaciones=$OP_JSON")
+reintentos_post=6
+CODIGO_POST=0
+
+while [ "$reintentos_post" -gt 0 ]; do
+  CODIGO_POST=$(curl -s -w "%{http_code}" -o "$RESP_POST" -X POST "$URL/jobs" \
+    -H "Authorization: Bearer $TOKEN" \
+    -F "archivos=@$IMG_ENTRADA" \
+    -F "operaciones=$OP_JSON")
+
+  if [ "$CODIGO_POST" = "202" ]; then
+    break
+  elif [ "$CODIGO_POST" = "503" ]; then
+    echo "   ... backend respondió 503 (esperando que los workers se registren en Redis). Reintentando en 5s..."
+    sleep 5
+    reintentos_post=$((reintentos_post - 1))
+  else
+    break
+  fi
+done
 
 if [ "$CODIGO_POST" != "202" ]; then
   echo "❌ Error: POST /jobs respondió código $CODIGO_POST (esperaba 202)." >&2
