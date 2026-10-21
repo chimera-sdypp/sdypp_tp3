@@ -234,7 +234,7 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 | `sobel.dlq.agotados` | cola quorum | reasignador → backend (al reprocesar) |
 | `sobel.resultados` | exchange fanout | worker (último paso) → joiner y frontend |
 | `sobel.joiner` | cola quorum, atada a `sobel.resultados` | → joiner (compiten las réplicas) |
-| (sin nombre) | cola exclusiva, atada a `sobel.resultados` | → frontend; una por réplica, se borra sola |
+| (sin nombre) | cola exclusiva, atada a `sobel.resultados` (`colas.declarar_exclusiva`) | → frontend; una por réplica, se borra sola |
 
 - `<imagen>` es la referencia completa de la imagen (`sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0`).
 - Todos declaran con `hit3/comun/colas.py` y el mismo `SOBEL_LIMITE_ENTREGAS`: si una cola ya existe con otros
@@ -296,7 +296,7 @@ Todas las claves de un job empiezan con `job:<id>` y vencen a las 24 h (`SOBEL_T
 | `job:<id>:resultado:<a>` | string | joiner → backend | La imagen final en PNG |
 | `jobs`, `jobs:<usuario>` | zset | backend | `job_id` con la hora de creación como puntaje |
 | `terminados` | list | joiner, split, reasignador → backend | `"<estado> <ms totales>"` de los últimos 1000 jobs terminados (`LPUSH` + `LTRIM`), para `/stats` |
-| `worker:<id>` | hash, vence a los 15 s | worker → backend | `<id>` es el hostname (pod o VM). `imagen`, `operaciones` (separadas por coma), `host`. El worker lo renueva cada 5 s |
+| `worker:<id>` | hash, vence a los 15 s | worker → backend, frontend | `<id>` es el hostname (pod o VM). `imagen`, `operaciones` (separadas por coma), `host`. El worker lo renueva cada 5 s |
 | `limite:<usuario>:<minuto>` | string, vence a los 60 s | backend | Contador del límite de pedidos |
 
 **Quién escribe qué en `job:<id>`:**
@@ -333,6 +333,7 @@ Cada servicio expone `GET /metrics` (formato Prometheus) en su puerto HTTP.
 | `sobel_tareas_en_cola` | gauge | `cola` | backend, cada 10 s |
 | `sobel_tiempo_job_segundos` | histograma | — | joiner, al pasar un job a `done` |
 | `sobel_pedidos_total` | counter | `ruta`, `codigo` | backend |
+| `sobel_frontend_navegadores` | gauge | — | frontend: navegadores mirando el avance de un job |
 
 El plugin `rabbitmq_prometheus` (puerto 15692) da publicados, consumidos y en cola. Por defecto suma todas las colas;
 para verlas una por una se usa `/metrics/per-object`.
@@ -341,6 +342,12 @@ para verlas una por una se usa `/metrics/per-object`.
 
 Un servicio por carpeta en `hit3/`. Todos escuchan HTTP en el **8080** (`/health` y `/metrics`; el backend y el frontend
 además sus rutas). Imágenes privadas: `ghcr.io/chimera-sdypp/sobel-<servicio>:<tag>`.
+
+El ingress manda `/jobs`, `/stats`, `/admin` y `/health` al backend y el resto al frontend, así la página llama a la
+API en el mismo host. Rutas del frontend: `GET /` (la página), `GET /ofertas` (`{imagen: [operaciones]}` de los
+`worker:<id>`) y `GET /eventos/{id}`, que manda por Server-Sent Events cada resultado de ese job que llega a
+`sobel.resultados`. `/eventos` pide el mismo token que la API: el frontend se lo reenvía al backend en un
+`GET /jobs/{id}` y, si no da `200`, devuelve esa misma respuesta.
 
 El `/health` de cada servicio devuelve `{"<servicio>": "ok", "rabbitmq": "ok", "redis": "ok"}`: `200`, o `503` si alguna
 conexión está caída. Las conexiones a RabbitMQ y Redis se reintentan con backoff de 1, 2, 4, 8… s, con tope de 30 s
@@ -351,6 +358,7 @@ conexión está caída. Las conexiones a RabbitMQ y Redis se reintentan con back
 | `RABBITMQ_URL` | todos | — | `amqp://usuario:clave@host:5672/` (Secret) |
 | `REDIS_URL` | todos | — | `redis://:clave@host:6379/0` (Secret) |
 | `SOBEL_PUERTO` | todos | `8080` | Puerto HTTP |
+| `BACKEND_URL` | frontend | — | URL interna del backend (`http://backend:8080`), para validar el token de `/eventos` |
 | `SOBEL_TTL` | todos | `86400` | Segundos que viven las claves de un job |
 | `SOBEL_LIMITE_ENTREGAS` | todos | `3` | `x-delivery-limit` de las `sobel.tareas.<imagen>`. Igual en todos (§9) |
 | `SOBEL_SECRETO` | backend | — | Firma de los JWT (Secret) |
