@@ -1,0 +1,12 @@
+#!/bin/bash
+# Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+set -euo pipefail
+if ! command -v docker >/dev/null; then
+  apt-get update -q
+  apt-get install -y -q docker.io
+fi
+# La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
+gcloud auth configure-docker "${registro}" --quiet
+docker pull "${imagen}"
+docker rm -f worker 2>/dev/null || true
+docker run -d --name worker --restart unless-stopped -p 8080:8080 "${imagen}"

@@ -1,0 +1,95 @@
+name: Terraform
+
+# validate en cada cambio; plan en cada PR y apply al mergear a main. plan y apply se autentican contra
+# GCP por OIDC (sin claves) y corren recién cuando existen las variables del repo (salidas de infra/base):
+# GCP_PROYECTO, GCP_PROVEEDOR_WIF, GCP_CUENTA_CI, TF_BUCKET, HIT2_IMAGEN, HIT2_IP_PERMITIDA, HIT3_IMAGEN_WORKER.
+on:
+  pull_request:
+    paths: ["infra/**", "hit2/infra/**", "hit3/infra/**", ".github/workflows/terraform.yml"]
+  push:
+    branches: [main]
+    paths: ["infra/**", "hit2/infra/**", "hit3/infra/**", ".github/workflows/terraform.yml"]
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+  TF_VAR_proyecto: ${{ vars.GCP_PROYECTO }}
+  TF_VAR_imagen: ${{ vars.HIT2_IMAGEN }}
+  TF_VAR_ip_permitida: ${{ vars.HIT2_IP_PERMITIDA }}
+  TF_VAR_imagen_worker: ${{ vars.HIT3_IMAGEN_WORKER }}
+
+jobs:
+  validar:
+    name: Terraform validate (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dir: [infra/base, hit2/infra, hit3/infra]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+      - run: terraform fmt -check -diff
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  # infra/base no está acá: crea la identidad del CI, así que se aplica una vez a mano.
+  plan:
+    name: Terraform plan (${{ matrix.dir }})
+    needs: validar
+    if: github.event_name == 'pull_request' && vars.GCP_PROVEEDOR_WIF != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      matrix:
+        dir: [hit2/infra, hit3/infra]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_PROVEEDOR_WIF }}
+          service_account: ${{ vars.GCP_CUENTA_CI }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+      - run: terraform init -backend-config="bucket=${{ vars.TF_BUCKET }}"
+      - run: terraform plan -lock-timeout=5m
+
+  apply:
+    name: Terraform apply (${{ matrix.dir }})
+    needs: validar
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_PROVEEDOR_WIF != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      max-parallel: 1
+      matrix:
+        dir: [hit2/infra, hit3/infra]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_PROVEEDOR_WIF }}
+          service_account: ${{ vars.GCP_CUENTA_CI }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.3
+      - run: terraform init -backend-config="bucket=${{ vars.TF_BUCKET }}"
+      - run: terraform apply -auto-approve -lock-timeout=5m
