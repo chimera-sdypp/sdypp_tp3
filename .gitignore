@@ -60,3 +60,14 @@ venv.bak/
 *.swo
 *~
 Thumbs.db
+
+# Documents & Internal notes
+TP3-P2*
+*.docx
+CONTEXTO*
+contexto*
+
+# Test data & load test artifacts
+hit3/carga/datos/
+hit3/carga/resultados/
+
