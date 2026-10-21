@@ -1,0 +1,70 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sobel-alert-rules
+  namespace: sobel
+  labels:
+    app.kubernetes.io/part-of: sobel-distribuido
+    release: prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: sobel.alertas
+      rules:
+        # ----------------------------------------------------------------------
+        # 1. Alerta: Cola de RabbitMQ por encima del umbral de saturación
+        # ----------------------------------------------------------------------
+        - alert: SobelColaSaturada
+          expr: rabbitmq_queue_messages{queue=~"sobel\\..*"} > 50 or max(sobel_tareas_en_cola) by (cola) > 50
+          for: 1m
+          labels:
+            severity: warning
+            app: sobel
+          annotations:
+            summary: "Cola {{ $labels.queue }} saturada en RabbitMQ"
+            description: "La cola {{ $labels.queue }} acumula {{ $value }} mensajes pendientes durante más de 1 minuto, superando el umbral de procesamiento normal (50 mensajes)."
+
+        # ----------------------------------------------------------------------
+        # 2. Alerta: Worker que no responde o sin réplicas disponibles
+        # ----------------------------------------------------------------------
+        - alert: SobelWorkerCaido
+          expr: |
+            (kube_deployment_status_replicas_available{namespace="sobel", deployment=~".*worker"} < 1)
+            or
+            (up{namespace="sobel", job=~".*worker.*"} == 0)
+          for: 30s
+          labels:
+            severity: critical
+            app: sobel
+          annotations:
+            summary: "Worker {{ $labels.deployment }} sin réplicas activas o caído"
+            description: "El servicio de procesamiento de workers {{ $labels.deployment }} no tiene réplicas disponibles o falló su healthcheck durante más de 30 segundos."
+
+        # ----------------------------------------------------------------------
+        # 3. Alerta: Mensajes agotados en la Dead Letter Queue (DLQ)
+        # ----------------------------------------------------------------------
+        - alert: SobelDLQAgotadosPresentes
+          expr: rabbitmq_queue_messages{queue="sobel.dlq.agotados"} > 0
+          for: 1m
+          labels:
+            severity: warning
+            app: sobel
+          annotations:
+            summary: "Fragmentos acumulados en sobel.dlq.agotados"
+            description: "Existen {{ $value }} fragmentos que agotaron sus reintentos máximos y requieren intervención manual de un administrador (/admin/dlq/reprocesar)."
+
+        # ----------------------------------------------------------------------
+        # 4. Alerta: Tasa de errores elevada en la API
+        # ----------------------------------------------------------------------
+        - alert: SobelTasaErroresElevada
+          expr: |
+            sum(rate(sobel_pedidos_total{codigo=~"5.."}[5m]))
+            /
+            sum(rate(sobel_pedidos_total[5m])) > 0.05
+          for: 2m
+          labels:
+            severity: critical
+            app: sobel
+          annotations:
+            summary: "Tasa de errores 5xx superior al 5% en Sobel Backend"
+            description: "Más del 5% de las solicitudes al backend están respondiendo con error de servidor (5xx) en los últimos 5 minutos."

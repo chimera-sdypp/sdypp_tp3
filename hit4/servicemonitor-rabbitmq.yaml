@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rabbitmq-metrics
+  namespace: sobel
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    release: prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - sobel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  endpoints:
+    - port: prometheus
+      path: /metrics/per-object
+      interval: 10s
+      scrapeTimeout: 5s
