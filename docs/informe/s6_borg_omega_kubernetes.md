@@ -179,12 +179,14 @@ Esta sección provee los elementos que se integran en el informe consolidado fin
   * `SobelWorkerInactivo`: Dispara una alerta de severidad `critical` si la cantidad de workers activos cae a 0 mientras existen tareas pendientes encoladas.
 
 ### 6.2 Resumen de Pruebas de Carga con k6 (Hit #3 / R5)
-* **Suite de pruebas:** Script modular `hit3/carga/carga_matriz.js` con soporte para matrices multidimensionales:
+* **Suite de pruebas:** Script modular `hit3/carga/matriz_r5.js` con soporte para matrices multidimensionales y validación de SLOs:
   * $V_A$ Archivos: 1, 10, 50.
-  * $V_B$ Operaciones: 1 (sobel), 2 (sobel + grises).
+  * $V_B$ Operaciones: 1 (sobel), 2 (sobel + grises), 3 (grises + blur + sobel).
   * $V_C$ Usuarios Concurrentes: 1, 10, 50 VUs con rampa de aceleración controlada.
+  * $V_1$ Tamaños de imagen calibrados: 1 KB, 1 MB, 10 MB y 50 MB (generados por `generar_datos.py`).
+  * $V_3$ Cantidad de réplicas de workers activos.
   * Token de autenticación Bearer dinámico para el tráfico legítimo y simulación de bot no autorizado sin token.
-  * Inyección controlada de casos anómalos: operaciones inválidas y archivos binarios corruptos.
+  * Inyección controlada de casos anómalos: operaciones inválidas (HTTP 422) y archivos binarios corruptos.
 * **Runner automatizado:** `correr_matriz.sh` para ejecución reproducible con k6 binario o contenedor `grafana/k6`, volcando resultados en JSON estructurado y resumen Markdown.
 
 ---
