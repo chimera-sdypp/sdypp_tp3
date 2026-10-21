@@ -71,3 +71,11 @@ contexto*
 hit3/carga/datos/
 hit3/carga/resultados/
 
+
+# Terraform: el estado vive en el bucket remoto, nunca acá
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
