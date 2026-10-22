@@ -10,10 +10,16 @@ from split import split
 from worker import worker
 
 IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
+OTRA_IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.1.0"
 
 
 def cadena(*operaciones):
     return [{"operacion": op, "imagen": IMAGEN} for op in operaciones]
+
+
+def grises_en(*imagenes):
+    """Una cadena de `grises` con un paso por imagen de worker: sirve para seguir a qué cola va cada paso."""
+    return [{"operacion": "grises", "imagen": imagen} for imagen in imagenes]
 
 
 class CanalQuePublica:
@@ -87,24 +93,24 @@ def test_el_ultimo_paso_publica_el_resultado_en_el_fanout(redis):
         "job_id": "j1", "archivo": 0, "fragmento": 2, "worker": "w1", "ms": 412, "intento": 2})]
 
 
-OTRA = "ghcr.io/chimera-sdypp/sobel-worker:1.1.0"
-
-
 def test_un_paso_intermedio_manda_la_tarea_a_la_cola_de_la_imagen_del_paso_siguiente(redis):
-    operaciones = [{"operacion": "grises", "imagen": IMAGEN}, {"operacion": "grises", "imagen": OTRA}]
+    operaciones = grises_en(IMAGEN, OTRA_IMAGEN)
     cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=operaciones, intento=3)
     canal = CanalQuePublica()
+    # Los tres instantes de siempre y uno más: cuando publica la tarea del paso siguiente.
+    ahora_ms = reloj(1761055391100, 1761055391300, 1761055391712, 1761055391720)
 
-    manejador(redis, ahora_ms=reloj(1761055391100, 1761055391300, 1761055391712, 1761055391720))(canal, cuerpo)
+    manejador(redis, ahora_ms=ahora_ms)(canal, cuerpo)
 
-    cola = f"sobel.tareas.{OTRA}"
+    cola = f"sobel.tareas.{OTRA_IMAGEN}"
     assert canal.eventos == [("declarar", cola), ("publicar", "", cola, {
         "job_id": "j1", "archivo": 0, "fragmento": 2, "paso": 1, "operaciones": operaciones,
         "intento": 1, "encolado": 1761055391720})]
+    assert redis.exists("job:j1:frag:0:2:1") and not redis.exists("job:j1:frag:0:2:0")
 
 
 def test_el_ultimo_paso_de_una_cadena_publica_el_resultado_con_el_intento_de_esa_tarea(redis):
-    operaciones = [{"operacion": "grises", "imagen": IMAGEN}, {"operacion": "grises", "imagen": OTRA}]
+    operaciones = grises_en(IMAGEN, OTRA_IMAGEN)
     cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=operaciones, paso=1, intento=2)
     canal = CanalQuePublica()
 
@@ -167,21 +173,25 @@ def cargar_job(redis, job_id, archivos, operaciones):
 def procesar_job(redis, job_id, partes):
     """Corre el split y después el worker sobre cada tarea publicada, hasta que no quedan tareas.
 
-    Devuelve los mensajes que llegaron a sobel.resultados.
+    Cada tarea tiene que ir, ya declarada, a la cola de la imagen de su paso. Devuelve los mensajes que
+    llegaron a sobel.resultados.
     """
     canal = CanalQuePublica()
     split.manejador(redis, partes=partes)(canal, json.dumps({"job_id": job_id}).encode())
     resultados = []
+    declaradas = set()
     trabajador = worker.manejador(redis, nombre="w1")
     while canal.eventos:
         evento = canal.eventos.pop(0)
-        if evento[0] != "publicar":
+        if evento[0] == "declarar":
+            declaradas.add(evento[1])
             continue
-        _, exchange, _, mensaje = evento
+        _, exchange, cola, mensaje = evento
         if exchange == "sobel.resultados":
             resultados.append(mensaje)
-        else:
-            trabajador(canal, json.dumps(mensaje).encode())
+            continue
+        assert cola == f"sobel.tareas.{mensaje['operaciones'][mensaje['paso']]['imagen']}" and cola in declaradas
+        trabajador(canal, json.dumps(mensaje).encode())
     return resultados
 
 
@@ -207,11 +217,11 @@ def test_un_job_en_grises_partido_y_procesado_da_la_imagen_entera_en_grises(redi
         np.testing.assert_array_equal(unir(redis, "j1", archivo, paso=1), esperado)
 
 
-@pytest.mark.parametrize("imagenes", [[IMAGEN, OTRA], [OTRA, IMAGEN, OTRA]], ids=["2_pasos", "3_pasos"])
+@pytest.mark.parametrize("imagenes", [[IMAGEN, OTRA_IMAGEN], [OTRA_IMAGEN, IMAGEN, OTRA_IMAGEN]],
+                         ids=["2_pasos", "3_pasos"])
 def test_una_cadena_de_varios_pasos_llega_entera_a_los_resultados(redis, imagenes):
     original = imagen_rgb(10, 6, semilla=3)
-    operaciones = [{"operacion": "grises", "imagen": imagen} for imagen in imagenes]
-    cargar_job(redis, "j1", [png(original)], operaciones)
+    cargar_job(redis, "j1", [png(original)], grises_en(*imagenes))
 
     resultados = procesar_job(redis, "j1", partes=4)
 

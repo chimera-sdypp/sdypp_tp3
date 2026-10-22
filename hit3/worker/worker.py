@@ -23,12 +23,13 @@ def manejador(redis, nombre, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms):
         inicio = ahora_ms()
         salida = OPERACIONES[operacion](entrada)
         proc_ms = ahora_ms() - inicio
-        redis.set(claves.fragmento(job_id, archivo, indice, paso + 1), pixeles.a_png(salida), ex=ttl)
-        if paso + 1 < len(tarea["operaciones"]):
+        siguiente = paso + 1
+        redis.set(claves.fragmento(job_id, archivo, indice, siguiente), pixeles.a_png(salida), ex=ttl)
+        if siguiente < len(tarea["operaciones"]):
             # Cada paso es una tarea nueva, con sus propios reintentos. Se declara antes de publicar por si
             # todavía no arrancó ningún worker de esa imagen (contrato §9).
-            cola = colas.declarar_tareas(canal, tarea["operaciones"][paso + 1]["imagen"])
-            colas.publicar(canal, cola, {**tarea, "paso": paso + 1, "intento": 1, "encolado": ahora_ms()})
+            cola = colas.declarar_tareas(canal, tarea["operaciones"][siguiente]["imagen"])
+            colas.publicar(canal, cola, {**tarea, "paso": siguiente, "intento": 1, "encolado": ahora_ms()})
         else:
             colas.publicar(canal, "", {"job_id": job_id, "archivo": archivo, "fragmento": indice, "worker": nombre,
                                        "ms": proc_ms, "intento": tarea["intento"]}, exchange=colas.RESULTADOS)
