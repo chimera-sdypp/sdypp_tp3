@@ -28,9 +28,13 @@ def leer(datos):
     """Bytes PNG → matriz uint8 con los canales que tenga: alto × ancho para un canal, alto × ancho × 3 para RGB.
 
     A diferencia de `leer_rgb`, no normaliza: el worker recibe lo que dejó el paso anterior.
+    Lanza ValueError si los bytes no son una imagen o están cortados.
     """
-    with Image.open(io.BytesIO(datos)) as imagen:
-        return np.asarray(imagen)
+    try:
+        with Image.open(io.BytesIO(datos)) as imagen:
+            return np.asarray(imagen)
+    except (OSError, Image.DecompressionBombError):  # los mismos casos que en leer_rgb
+        raise ValueError("no se pudo decodificar") from None
 
 
 def dividir(matriz, partes, filas_de_borde):

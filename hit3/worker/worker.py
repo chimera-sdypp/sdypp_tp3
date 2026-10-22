@@ -1,5 +1,7 @@
-"""Worker: toma cada tarea de sobel.tareas.<imagen>, aplica la operación del paso y manda el fragmento al paso siguiente."""
+"""Worker: toma cada tarea de sobel.tareas.<imagen>, aplica la operación del paso y manda el fragmento
+al paso siguiente."""
 
+import contextlib
 import json
 import logging
 import os
@@ -14,36 +16,96 @@ from worker.operaciones import OPERACIONES
 
 VIGENCIA_DEL_ANUNCIO = 15  # s: si el worker deja de anunciarse, deja de contar como activo (contrato §10)
 CADA_CUANTO_ANUNCIAR = 5  # s
+TIMEOUT_POR_DEFECTO = 60  # s por fragmento (SOBEL_TIMEOUT, contrato §12)
 
 
 def ahora_en_ms():
     return int(time.time() * 1000)
 
 
-def manejador(redis, nombre, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.worker")):
-    """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada tarea; lo que escribe vence en `ttl` s."""
+class OperacionNoOfrecida(Exception):
+    """La tarea pide una operación que este worker no ofrece (SOBEL_OPERACIONES): va a la DLQ."""
+
+
+class TiempoAgotado(Exception):
+    """La operación pasó SOBEL_TIMEOUT: la tarea va a la DLQ."""
+
+
+@contextlib.contextmanager
+def tiempo_limite(segundos):
+    """Corta lo que corre adentro con TiempoAgotado si pasa `segundos`, con SIGALRM.
+
+    Sólo en el hilo principal, que es donde pika corre el callback. Corta entre instrucciones de Python (entre
+    las ventanas del Sobel), no en el medio de una operación de numpy. Al salir desarma el timer y deja el
+    handler que había.
+    """
+    def vencer(_senal, _frame):
+        raise TiempoAgotado(f"la operación pasó los {segundos} s")
+
+    anterior = signal.signal(signal.SIGALRM, vencer)
+    signal.setitimer(signal.ITIMER_REAL, segundos)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, anterior)
+
+
+def mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms):
+    """Publica el paso siguiente de la tarea o, si era el último, el resultado. Devuelve a dónde la mandó."""
+    siguiente = tarea["paso"] + 1
+    if siguiente < len(tarea["operaciones"]):
+        # Cada paso es una tarea nueva, con sus propios reintentos. Se declara antes de publicar por si
+        # todavía no arrancó ningún worker de esa imagen (contrato §9).
+        destino = colas.declarar_tareas(canal, tarea["operaciones"][siguiente]["imagen"])
+        colas.publicar(canal, destino, {**tarea, "paso": siguiente, "intento": 1, "encolado": ahora_ms()})
+        return destino
+    colas.publicar(canal, "", {"job_id": tarea["job_id"], "archivo": tarea["archivo"], "fragmento": tarea["fragmento"],
+                               "worker": nombre, "ms": proc_ms, "intento": tarea["intento"]}, exchange=colas.RESULTADOS)
+    return colas.RESULTADOS
+
+
+def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), operaciones=OPERACIONES, timeout=TIMEOUT_POR_DEFECTO,
+              ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.worker")):
+    """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada tarea; lo que escribe vence en `ttl` s.
+
+    Una excepción (operación no ofrecida, fragmento ilegible, timeout) hace que `consumir` mande la tarea a la DLQ.
+    """
 
     def procesar(canal, cuerpo):
         recibida = ahora_ms()
         tarea = json.loads(cuerpo)
         job_id, archivo, indice, paso = tarea["job_id"], tarea["archivo"], tarea["fragmento"], tarea["paso"]
         operacion = tarea["operaciones"][paso]["operacion"]
-        entrada = pixeles.leer(redis.get(claves.fragmento(job_id, archivo, indice, paso)))
+        if not redis.exists(claves.job(job_id)):
+            # Venció (24 h) o nunca terminó de crearse: nadie lo va a consultar, y sumarle tiempos lo
+            # recrearía sin vencimiento.
+            log.warning("job %s no existe, se descarta el fragmento %d del archivo %d", job_id, indice, archivo)
+            return
+        if operacion not in ofrecidas:
+            raise OperacionNoOfrecida(f"este worker no ofrece {operacion} (ofrece: {', '.join(ofrecidas)})")
+        datos = redis.get(claves.fragmento(job_id, archivo, indice, paso))
+        if datos is None and redis.exists(claves.fragmento(job_id, archivo, indice, paso + 1)):
+            # Redelivery de una tarea que ya terminó: se cortó entre el borrado de la entrada y el ack. La salida
+            # está escrita; sólo falta mandarla. Sin sumar tiempos: ya se contaron (y no se sabe cuánto tardó).
+            destino = mandar_adelante(canal, tarea, nombre, 0, ahora_ms)
+            log.info("job %s: archivo %d, fragmento %d ya estaba hecho, se manda de nuevo → %s",
+                     job_id, archivo, indice, destino)
+            return
+        if datos is None:
+            # Ni reintentarla ni la DLQ lo arreglan: el fragmento ya no existe (venció, o el joiner ya lo unió).
+            log.warning("job %s: archivo %d, fragmento %d sin entrada ni salida del paso %d, se descarta",
+                        job_id, archivo, indice, paso)
+            return
+        entrada = pixeles.leer(datos)
         inicio = ahora_ms()
-        salida = OPERACIONES[operacion](entrada)
+        with tiempo_limite(timeout):  # sólo la operación: cortar una llamada a Redis o a RabbitMQ deja todo a medias
+            salida = operaciones[operacion](entrada)
         proc_ms = ahora_ms() - inicio
-        siguiente = paso + 1
-        redis.set(claves.fragmento(job_id, archivo, indice, siguiente), pixeles.a_png(salida), ex=ttl)
-        if siguiente < len(tarea["operaciones"]):
-            # Cada paso es una tarea nueva, con sus propios reintentos. Se declara antes de publicar por si
-            # todavía no arrancó ningún worker de esa imagen (contrato §9).
-            destino = colas.declarar_tareas(canal, tarea["operaciones"][siguiente]["imagen"])
-            colas.publicar(canal, destino, {**tarea, "paso": siguiente, "intento": 1, "encolado": ahora_ms()})
-        else:
-            destino = colas.RESULTADOS
-            colas.publicar(canal, "", {"job_id": job_id, "archivo": archivo, "fragmento": indice, "worker": nombre,
-                                       "ms": proc_ms, "intento": tarea["intento"]}, exchange=colas.RESULTADOS)
-        log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s", job_id, archivo, indice, operacion, proc_ms, destino)
+        redis.set(claves.fragmento(job_id, archivo, indice, paso + 1), pixeles.a_png(salida), ex=ttl)
+        destino = mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms)
+        log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s",
+                 job_id, archivo, indice, operacion, proc_ms, destino)
         clave_job = claves.job(job_id)
         with redis.pipeline() as transaccion:  # sumas y cantidades para los promedios de tiempos_s (contrato §3)
             transaccion.hincrby(clave_job, "cola_ms", recibida - tarea["encolado"])
@@ -106,6 +168,7 @@ def main():
     signal.signal(signal.SIGTERM, apagar)
     imagen = conexion.variable_obligatoria("SOBEL_IMAGEN")
     ofrecidas = operaciones_de_entorno()
+    timeout = conexion.entero_de_entorno("SOBEL_TIMEOUT", TIMEOUT_POR_DEFECTO, 1)
     ttl = conexion.entero_de_entorno("SOBEL_TTL", claves.TTL_POR_DEFECTO, 1)
     puerto = conexion.entero_de_entorno("SOBEL_PUERTO", 8080, 1)
     nombre = socket.gethostname()  # el nombre del pod (o de la VM)
@@ -121,8 +184,8 @@ def main():
         return colas.declarar_tareas(canal, imagen)
 
     log.info("worker %s consumiendo sobel.tareas.%s, ofrece %s", nombre, imagen, ",".join(ofrecidas))
-    conexion.consumir(None, manejador(redis, nombre, ttl, log=log), al_conectar=al_conectar,
-                      cliente_redis=redis, log=log)
+    tareas = manejador(redis, nombre, ofrecidas, timeout=timeout, ttl=ttl, log=log)
+    conexion.consumir(None, tareas, al_conectar=al_conectar, cliente_redis=redis, log=log)
 
 
 if __name__ == "__main__":

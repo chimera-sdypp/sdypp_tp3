@@ -1,5 +1,7 @@
 import io
 import json
+import signal
+import time
 
 import fakeredis
 import numpy as np
@@ -62,7 +64,12 @@ def redis():
 
 def cargar_tarea(redis, fragmento, operaciones=cadena("grises"), paso=0, job_id="j1", archivo=0, indice=2,
                  encolado=1761055391000, intento=1):
-    """Deja la entrada como la deja el split (o el worker del paso anterior) y devuelve el cuerpo de la tarea (§9)."""
+    """Deja el job y la entrada como los dejan el backend y el split (o el worker del paso anterior).
+
+    Devuelve el cuerpo de la tarea (§9).
+    """
+    redis.hsetnx(f"job:{job_id}", "estado", "processing")
+    redis.expire(f"job:{job_id}", 86400)
     redis.set(f"job:{job_id}:frag:{archivo}:{indice}:{paso}", png(fragmento))
     return json.dumps({"job_id": job_id, "archivo": archivo, "fragmento": indice, "paso": paso,
                        "operaciones": operaciones, "intento": intento, "encolado": encolado}).encode()
@@ -212,7 +219,7 @@ def test_un_job_en_grises_partido_y_procesado_da_la_imagen_entera_en_grises(redi
 
     resultados = procesar_job(redis, "j1", partes=3)
 
-    assert sorted((r["archivo"], r["fragmento"]) for r in resultados) == [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)]
+    assert sorted((r["archivo"], r["fragmento"]) for r in resultados) == [(a, f) for a in (0, 1) for f in (0, 1, 2)]
     for archivo, original in enumerate(originales):
         esperado = np.asarray(Image.fromarray(original).convert("L"))
         np.testing.assert_array_equal(unir(redis, "j1", archivo, paso=1), esperado)
@@ -277,3 +284,103 @@ def test_el_anuncio_deja_la_imagen_y_las_operaciones_del_worker_por_15_segundos(
 
     assert redis.hgetall("worker:w1") == {b"imagen": IMAGEN.encode(), b"operaciones": b"sobel,grises", b"host": b"w1"}
     assert 0 < redis.ttl("worker:w1") <= 15
+
+
+# Cuando algo sale mal (ticket 05): redelivery, job vencido, errores y timeout.
+
+def test_un_redelivery_de_una_tarea_ya_terminada_vuelve_a_mandar_el_paso_siguiente_sin_sumar_tiempos(redis):
+    # Se cortó entre el borrado de la entrada y el ack: la salida quedó escrita y la tarea vuelve a llegar.
+    operaciones = grises_en(IMAGEN, OTRA_IMAGEN)
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=operaciones)
+    redis.rename("job:j1:frag:0:2:0", "job:j1:frag:0:2:1")
+    antes = redis.hgetall("job:j1")
+    canal = CanalQuePublica()
+
+    manejador(redis, ahora_ms=reloj(1761055391100, 1761055391120))(canal, cuerpo)
+
+    cola = f"sobel.tareas.{OTRA_IMAGEN}"
+    assert canal.eventos == [("declarar", cola), ("publicar", "", cola, {
+        "job_id": "j1", "archivo": 0, "fragmento": 2, "paso": 1, "operaciones": operaciones,
+        "intento": 1, "encolado": 1761055391120})]
+    assert redis.hgetall("job:j1") == antes and not redis.exists("job:j1:workers")
+
+
+def test_una_tarea_sin_entrada_ni_salida_avisa_y_no_hace_nada(redis, caplog):
+    # Por ejemplo, el joiner ya unió el archivo y borró los fragmentos del último paso.
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6))
+    redis.delete("job:j1:frag:0:2:0")
+    antes = redis.hgetall("job:j1")
+    canal = CanalQuePublica()
+
+    manejador(redis)(canal, cuerpo)
+
+    assert canal.eventos == []
+    assert redis.hgetall("job:j1") == antes and redis.keys("job:j1:*") == []
+    assert any(r.levelname == "WARNING" and "j1" in r.getMessage() for r in caplog.records)
+
+
+def test_una_tarea_de_un_job_vencido_no_lo_revive(redis, caplog):
+    # Las claves vencen en momentos distintos: el hash del job ya no está, pero el fragmento sí.
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6))
+    redis.delete("job:j1")
+    canal = CanalQuePublica()
+
+    manejador(redis)(canal, cuerpo)
+
+    assert canal.eventos == []
+    assert not redis.exists("job:j1") and not redis.exists("job:j1:workers")
+    assert any(r.levelname == "WARNING" and "j1" in r.getMessage() for r in caplog.records)
+
+
+def test_una_operacion_que_el_worker_no_ofrece_va_a_la_dlq_sin_publicar_nada(redis):
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("grises"))
+    canal = CanalQuePublica()
+
+    with pytest.raises(worker.OperacionNoOfrecida, match="grises"):  # consumir hace nack: va a la DLQ
+        manejador(redis, ofrecidas=["sobel", "blur"])(canal, cuerpo)
+
+    assert canal.eventos == []
+    assert redis.exists("job:j1:frag:0:2:0") and not redis.exists("job:j1:frag:0:2:1")  # el reasignador la reintenta
+
+
+@pytest.mark.parametrize("datos", [b"no soy un png", png(imagen_rgb(8, 8))[:60]], ids=["no_es_png", "png_cortado"])
+def test_un_fragmento_que_no_se_decodifica_va_a_la_dlq_sin_publicar_nada(redis, datos):
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6))
+    redis.set("job:j1:frag:0:2:0", datos)
+    canal = CanalQuePublica()
+
+    with pytest.raises(ValueError, match="decodificar"):
+        manejador(redis)(canal, cuerpo)
+
+    assert canal.eventos == [] and not redis.exists("job:j1:frag:0:2:1")
+
+
+def lenta(matriz):
+    for _ in range(100):  # 5 s en total, en pasos cortos como las ventanas del Sobel
+        time.sleep(0.05)
+    return matriz
+
+
+def test_una_operacion_que_pasa_el_timeout_se_corta_y_va_a_la_dlq_sin_publicar_nada(redis):
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6))
+    canal = CanalQuePublica()
+    handler_anterior = signal.getsignal(signal.SIGALRM)
+    inicio = time.monotonic()
+
+    with pytest.raises(worker.TiempoAgotado):
+        manejador(redis, operaciones={"grises": lenta}, timeout=0.2)(canal, cuerpo)
+
+    assert time.monotonic() - inicio < 2
+    assert canal.eventos == [] and not redis.exists("job:j1:frag:0:2:1")
+    assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+    assert signal.getsignal(signal.SIGALRM) is handler_anterior
+
+
+def test_una_operacion_que_termina_a_tiempo_deja_el_timer_desarmado(redis):
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6))
+    handler_anterior = signal.getsignal(signal.SIGALRM)
+
+    manejador(redis, timeout=30)(CanalQuePublica(), cuerpo)
+
+    assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+    assert signal.getsignal(signal.SIGALRM) is handler_anterior
