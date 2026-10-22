@@ -65,6 +65,14 @@ def variable_obligatoria(nombre):
         raise RuntimeError(f"falta la variable de entorno {nombre}") from None
 
 
+def entero_de_entorno(nombre, por_defecto, minimo):
+    """Un entero de la configuración (contrato §12); fuera de rango corta el arranque."""
+    valor = int(os.environ.get(nombre, por_defecto))
+    if valor < minimo:
+        raise RuntimeError(f"{nombre} tiene que ser al menos {minimo} (llegó {valor})")
+    return valor
+
+
 def conectar_rabbitmq(url=None, log=logging.getLogger("tp3.comun")):
     """Conexión bloqueante a $RABBITMQ_URL, esperando con backoff a que el broker responda."""
     url = url or variable_obligatoria("RABBITMQ_URL")

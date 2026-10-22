@@ -268,11 +268,20 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 **Qué hace el worker con cada tarea**, en este orden:
 
 1. Lee la entrada, aplica `operaciones[paso].operacion` y escribe `job:<id>:frag:<a>:<f>:<paso+1>`.
-2. Si quedan pasos, publica la misma tarea con `paso + 1` a la cola de la imagen del paso siguiente. Si era el último,
-   publica el resultado en `sobel.resultados`.
+2. Si quedan pasos, publica la misma tarea con `paso + 1` a la cola de la imagen del paso siguiente, con `intento` en 1
+   (cada paso es una tarea nueva, con sus propios reintentos) y `encolado` nuevo. Si era el último, publica el
+   resultado en `sobel.resultados`.
 3. Suma sus tiempos al job y se anota en `job:<id>:workers` (§10).
-4. Hace `ack` y borra la entrada. Si se cae antes del `ack`, el paso se repite: como las claves se pisan con lo mismo,
-   repetir no rompe nada; sólo los promedios de `tiempos_s` cuentan ese fragmento de más.
+4. Borra la entrada y después hace `ack`. Si se cae antes del `ack`, la tarea vuelve. Con la entrada todavía ahí, el
+   paso se repite: como las claves se pisan con lo mismo, repetir no rompe nada; sólo los promedios de `tiempos_s`
+   cuentan ese fragmento de más. Sin entrada pero con la salida escrita, vuelve a mandar el paso siguiente (o el
+   resultado) sin sumar tiempos.
+
+Una tarea de un job que ya no existe, o sin entrada ni salida (ya la consumió y la borró el worker del paso siguiente
+o el joiner), no tiene nada que procesar: el worker hace `ack` sin tocarla y lo deja en el log. Cualquier error al
+procesarla hace `nack` y la tarea va a la DLQ (ver **A la DLQ**, arriba): por ejemplo, una operación que el worker no
+ofrece (`SOBEL_OPERACIONES`), un fragmento que no se puede decodificar o una operación que pasa `SOBEL_TIMEOUT`. Las
+dos primeras no se arreglan reintentando: gastan los reintentos y el job termina en `dlq`, con su `error`.
 
 **`sobel.resultados`**:
 
@@ -280,9 +289,15 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 {"job_id": "3f6c2a9e-…", "archivo": 0, "fragmento": 3, "worker": "sobel-worker-7d9f-x2k4", "ms": 412, "intento": 1}
 ```
 
+`ms` es lo que tardó la operación del último paso. Si una tarea vuelve después de escribir la salida (reentrega, punto
+4), el worker manda el resultado con `ms: 0` y su propio nombre en `worker`. Puede ser la primera vez que llega o un
+duplicado: el joiner lo ignora si el `SADD` sobre `listos` devuelve 0.
+
 ## 10. Redis
 
-Todas las claves de un job empiezan con `job:<id>` y vencen a las 24 h (`SOBEL_TTL`).
+Todas las claves de un job empiezan con `job:<id>` y vencen a las 24 h (`SOBEL_TTL`). Se arman con
+`hit3/comun/claves.py`, como las colas con `colas.py`: una clave mal escrita no falla, sólo hace que un servicio no
+encuentre lo que escribió otro. El split y el worker ya lo usan; el backend y el frontend todavía las escriben a mano.
 
 | Clave | Tipo | Escribe → lee | Contenido |
 |---|---|---|---|
@@ -311,10 +326,11 @@ Todas las claves de un job empiezan con `job:<id>` y vencen a las 24 h (`SOBEL_T
 - **reasignador:** `reintentos`. Cuando un fragmento agota los intentos: `en_dlq`, `estado=dlq`, `error`, `terminado` y la entrada en `terminados`.
 
 **Bordes.** Sobel y blur necesitan los vecinos de cada píxel. El split le agrega a cada fragmento tantas filas extra
-arriba y abajo como operaciones de vecindad tenga la cadena (`sobel` y `blur` cuentan; `grises` no; con un `blur` de más
-de 3×3 harían falta más filas), y anota en
-`geometria` cuántas puso arriba y cuántas filas le pertenecen. El worker procesa el fragmento entero, sin saber de
-bordes, y el joiner recorta. Así el resultado es idéntico al de aplicar la cadena a la imagen entera, como en el Hit 1.
+arriba y abajo como operaciones de vecindad tenga la cadena (`sobel` y `blur` cuentan; `grises` no). Las dos son 3×3:
+`blur` es el promedio de cada píxel con sus 8 vecinos, canal por canal, replicando los píxeles del contorno de la
+imagen y con redondeo al entero más cercano. El split anota en `geometria` cuántas filas puso arriba y cuántas le
+pertenecen. El worker procesa el fragmento entero, sin saber de bordes, y el joiner recorta. Así el resultado es
+idéntico al de aplicar la cadena a la imagen entera, como en el Hit 1.
 
 **Que el joiner una cada archivo una sola vez.** `SADD` del fragmento en `listos`; si devuelve 1 (es nuevo), suma 1 a
 `completos`. Cuando el tamaño llega a `total`,
@@ -368,5 +384,5 @@ conexión está caída. Las conexiones a RabbitMQ y Redis se reintentan con back
 | `SOBEL_PARTES` | split | `4` | Fragmentos por archivo (menos si la imagen tiene menos filas) |
 | `SOBEL_IMAGEN` | worker | — | La referencia de su propia imagen; tiene que coincidir con la de `SOBEL_IMAGENES_PERMITIDAS` |
 | `SOBEL_OPERACIONES` | worker | `sobel,grises,blur` | Las operaciones que ofrece |
-| `SOBEL_TIMEOUT` | worker | `60` | Segundos máximos por fragmento; pasado ese tiempo, `nack` a la DLQ |
+| `SOBEL_TIMEOUT` | worker | `60` | Segundos máximos de la operación sobre un fragmento (no cuenta leer ni escribir el PNG); pasado ese tiempo, `nack` a la DLQ |
 | `SOBEL_REINTENTOS_MAX` | reasignador | `3` | Intentos antes de mandar el fragmento a `sobel.dlq.agotados` |
