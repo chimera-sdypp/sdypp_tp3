@@ -16,30 +16,38 @@ JOINER = "sobel.joiner"
 ARGUMENTOS_QUORUM = {"x-queue-type": "quorum"}
 
 
+def argumentos_con_dlq():
+    """Quorum con dead-letter a la DLQ: lo que un consumidor rechaza (nack sin reencolar) o lo que lo tira abajo más
+    veces que SOBEL_LIMITE_ENTREGAS (crash, OOM) va a sobel.dlq en vez de reintentarse para siempre.
+
+    La routing key fija hace que una sola atadura de la DLQ sirva para todas las colas; sin ella, el mensaje conserva
+    la key de su cola y el exchange direct lo tira.
+    """
+    return {
+        **ARGUMENTOS_QUORUM,
+        "x-dead-letter-exchange": DLX,
+        "x-dead-letter-routing-key": DLQ,
+        # Reentregas después de que el consumidor muere con el mensaje: con 3, la 4.ª caída lo manda a la DLQ.
+        "x-delivery-limit": int(os.environ.get("SOBEL_LIMITE_ENTREGAS", "3")),
+    }
+
+
 def declarar(canal):
     """Declara la topología fija. Es idempotente: cada servicio la llama al conectarse."""
     canal.exchange_declare(DLX, exchange_type="direct", durable=True)
     canal.exchange_declare(RESULTADOS, exchange_type="fanout", durable=True)
-    for cola in (SPLIT, DLQ, AGOTADOS, JOINER):
+    for cola in (SPLIT, JOINER):
+        canal.queue_declare(cola, durable=True, arguments=argumentos_con_dlq())
+    for cola in (DLQ, AGOTADOS):
         canal.queue_declare(cola, durable=True, arguments=ARGUMENTOS_QUORUM)
     canal.queue_bind(DLQ, DLX, routing_key=DLQ)
     canal.queue_bind(JOINER, RESULTADOS, routing_key="")
 
 
 def declarar_tareas(canal, imagen_worker):
-    """Declara la cola de tareas de una imagen de worker y devuelve su nombre.
-
-    La routing key fija de dead-letter hace que una sola atadura de la DLQ sirva para todas las
-    imágenes; sin ella, el mensaje conserva la key de su cola y el exchange direct lo tira.
-    """
+    """Declara la cola de tareas de una imagen de worker, con dead-letter a la DLQ, y devuelve su nombre."""
     cola = f"sobel.tareas.{imagen_worker}"
-    canal.queue_declare(cola, durable=True, arguments={
-        **ARGUMENTOS_QUORUM,
-        "x-dead-letter-exchange": DLX,
-        "x-dead-letter-routing-key": DLQ,
-        # Reentregas después de que un worker muere con el mensaje: con 3, la 4.ª caída lo manda a la DLQ.
-        "x-delivery-limit": int(os.environ.get("SOBEL_LIMITE_ENTREGAS", "3")),
-    })
+    canal.queue_declare(cola, durable=True, arguments=argumentos_con_dlq())
     return cola
 
 

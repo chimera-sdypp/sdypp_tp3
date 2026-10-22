@@ -98,7 +98,8 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
              conectar=None, dormir=time.sleep, log=logging.getLogger("tp3.comun")):
     """Consume `cola` llamando a `callback(canal, cuerpo)` por mensaje.
 
-    Si el callback termina bien hace ack; si lanza una excepción, nack sin reencolar (va a la DLQ).
+    Si el callback termina bien hace ack; si lanza una excepción, nack sin reencolar (va a la DLQ si la cola
+    tiene DLX; la exclusiva del frontend no tiene, y RabbitMQ lo descarta).
     El canal publica con confirmación del broker, y `al_conectar(canal)` declara la topología.
     Si `al_conectar` devuelve un nombre de cola, se consume esa: sirve para las colas exclusivas que
     RabbitMQ nombra en cada conexión (el frontend, contrato §9). En ese caso `cola` puede ser None.
@@ -119,7 +120,7 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
         except pika.exceptions.AMQPConnectionError:
             raise  # sin canal no hay nack: lo reencola el broker y se reconecta afuera
         except Exception:
-            log.exception("falló un mensaje de %s, va a la DLQ", consumida)
+            log.exception("falló un mensaje de %s, nack sin reencolar (va a la DLQ si la cola tiene DLX)", consumida)
             canal.basic_nack(delivery_tag=metodo.delivery_tag, requeue=False)
             return
         canal.basic_ack(delivery_tag=metodo.delivery_tag)

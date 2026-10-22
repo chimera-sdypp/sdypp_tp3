@@ -63,7 +63,7 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
         clave_job = claves.job(job_id)
         estado = redis.hget(clave_job, "estado")
         if estado is None:
-            # Ni reintentarlo ni la DLQ lo arreglan: sobel.split no tiene DLX y el reasignador maneja tareas.
+            # Ni reintentarlo ni la DLQ lo arreglan: el job ya no está, y el reasignador no tendría qué marcar.
             log.warning("job %s no existe (venció o el backend no lo terminó de crear), se descarta", job_id)
             return
         if estado != b"queued":
