@@ -115,7 +115,7 @@ Definidas como un recurso `PrometheusRule`:
 1. **`SobelColaSaturada` (Warning):**  
    Se activa si `sobel.tareas.*` o cualquier cola acumula más de **50 mensajes** durante más de 1 minuto.
 2. **`SobelWorkerCaido` (Critical):**  
-   Se activa si algún worker (`sobel-worker`, `grises-worker`, `blur-worker`) tiene 0 réplicas disponibles o falla su probe durante más de 30 segundos.
+   Se activa si el worker (`sobel-worker`) tiene 0 réplicas disponibles o falla su probe durante más de 30 segundos.
 3. **`SobelDLQAgotadosPresentes` (Warning):**  
    Se activa si hay mensajes en `sobel.dlq.agotados` requiriendo reprocesamiento manual.
 4. **`SobelTasaErroresElevada` (Critical):**  
