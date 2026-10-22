@@ -8,6 +8,7 @@ from PIL import Image
 
 from split import split
 from worker import worker
+from worker.operaciones import OPERACIONES
 
 IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
 OTRA_IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.1.0"
@@ -230,3 +231,35 @@ def test_una_cadena_de_varios_pasos_llega_entera_a_los_resultados(redis, imagene
                                   np.asarray(Image.fromarray(original).convert("L")))
     # Sólo quedan los del último paso: cada paso borró su entrada.
     assert sorted(redis.keys("job:j1:frag:*")) == [f"job:j1:frag:0:{f}:{len(imagenes)}".encode() for f in range(4)]
+
+
+def aplicar_entera(original, operaciones):
+    """La cadena aplicada a la imagen entera, sin partir: la referencia del procesamiento distribuido."""
+    resultado = original
+    for paso in operaciones:
+        resultado = OPERACIONES[paso["operacion"]](resultado)
+    return resultado
+
+
+@pytest.mark.parametrize("nombres", [
+    ["sobel"], ["blur"], ["grises", "blur"],  # una operación de vecindad: una fila de borde
+    ["blur", "sobel"], ["blur", "grises", "sobel"],  # dos: dos filas de borde
+], ids=lambda nombres: "_".join(nombres))
+def test_partir_y_procesar_da_lo_mismo_que_aplicar_la_cadena_a_la_imagen_entera(redis, nombres):
+    originales = [imagen_rgb(13, 8, semilla=4), imagen_rgb(7, 5, semilla=5)]  # 7 filas en 4 partes: 1 o 2 por fragmento
+    cargar_job(redis, "j1", [png(o) for o in originales], cadena(*nombres))
+
+    procesar_job(redis, "j1", partes=4)
+
+    for archivo, original in enumerate(originales):
+        np.testing.assert_array_equal(unir(redis, "j1", archivo, paso=len(nombres)),
+                                      aplicar_entera(original, cadena(*nombres)))
+
+
+def test_sobel_distribuido_es_identico_al_centralizado_del_hit1(redis, sobel_hit1):
+    original = imagen_rgb(17, 11, semilla=6)
+    cargar_job(redis, "j1", [png(original)], cadena("sobel"))
+
+    procesar_job(redis, "j1", partes=4)
+
+    np.testing.assert_array_equal(unir(redis, "j1", 0, paso=1), sobel_hit1.aplicar(sobel_hit1.leer_gris(png(original))))
