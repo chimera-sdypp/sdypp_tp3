@@ -9,6 +9,8 @@ import pika.exceptions
 import redis
 import redis.exceptions
 
+from comun import metricas
+
 ESPERA_INICIAL = 1
 ESPERA_MAXIMA = 30
 
@@ -94,7 +96,7 @@ def conectar_redis(url=None, log=logging.getLogger("tp3.comun")):
     return cliente
 
 
-def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None, con_propiedades=False,
+def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None, con_propiedades=False, servicio=None,
              conectar=None, dormir=time.sleep, log=logging.getLogger("tp3.comun")):
     """Consume `cola` llamando a `callback(canal, cuerpo)` por mensaje; con `con_propiedades`,
     `callback(canal, cuerpo, propiedades)`, para leer los headers (el reasignador, contrato §9).
@@ -106,8 +108,14 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None, c
     RabbitMQ nombra en cada conexión (el frontend, contrato §9). En ese caso `cola` puede ser None.
     Si se cae RabbitMQ, reconecta con backoff; los mensajes sin ack los reencola el broker.
     Si se cae Redis, el mensaje no tiene la culpa: vuelve a la cola y se espera a que Redis responda.
+    Con `servicio`, cuenta en `sobel_errores_total` (contrato §11) cada caída de Redis (`REDIS_CAIDO`) y cada nack, con
+    el nombre de la excepción en mayúsculas (`TiempoAgotado` → `TIEMPO_AGOTADO`).
     """
     conectar = conectar or (lambda: conectar_rabbitmq(log=log))
+
+    def contar_error(tipo):
+        if servicio is not None:
+            metricas.ERRORES.labels(servicio, tipo).inc()
 
     def manejar(canal, metodo, propiedades, cuerpo):
         try:
@@ -115,14 +123,16 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None, c
         except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as error:
             log.warning("se cayó redis procesando un mensaje de %s (%s), lo reencolo", consumida, error)
             canal.basic_nack(delivery_tag=metodo.delivery_tag, requeue=True)
+            contar_error("REDIS_CAIDO")
             if cliente_redis is not None:
                 con_backoff(cliente_redis.ping, "redis", dormir=dormir, log=log)
             return
         except pika.exceptions.AMQPConnectionError:
             raise  # sin canal no hay nack: lo reencola el broker y se reconecta afuera
-        except Exception:
+        except Exception as error:
             log.exception("falló un mensaje de %s, nack sin reencolar (va a la DLQ si la cola tiene DLX)", consumida)
             canal.basic_nack(delivery_tag=metodo.delivery_tag, requeue=False)
+            contar_error(metricas.tipo_de_error(error))
             return
         canal.basic_ack(delivery_tag=metodo.delivery_tag)
 

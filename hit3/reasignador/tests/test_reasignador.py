@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import fakeredis
 import pika.exceptions
 import pytest
+from prometheus_client import REGISTRY
 
 from reasignador import reasignador
 
@@ -306,3 +307,60 @@ def test_si_el_job_vence_justo_antes_de_marcarlo_no_lo_recrea(redis, mensaje, co
     manejador(VenceAntesDeEscribir(redis))(Canal(), *muerta(mensaje, cola=cola))
 
     assert redis.keys() == []
+
+
+# Métricas (contrato §11). El registro de Prometheus es global: cada test mira cuánto sumó.
+
+def metricas_del_reasignador():
+    def muestra(nombre, **etiquetas):
+        return REGISTRY.get_sample_value(nombre, etiquetas) or 0
+    return (muestra("sobel_tareas_procesadas_total", servicio="reasignador", operacion="reasignar", resultado="ok"),
+            muestra("sobel_tareas_procesadas_total", servicio="reasignador", operacion="agotar", resultado="ok"),
+            muestra("sobel_errores_total", servicio="reasignador", tipo="MENSAJE_ILEGIBLE"),
+            muestra("sobel_tareas_procesadas_total", servicio="reasignador", operacion="reasignar", resultado="error"),
+            muestra("sobel_tiempo_tarea_segundos_sum", servicio="reasignador", operacion="agotar"))
+
+
+def test_cuenta_cada_tarea_reasignada_y_cada_agotada(redis):
+    preparar_job(redis)
+    antes = metricas_del_reasignador()
+
+    manejador(redis)(Canal(), *muerta(tarea(intento=1)))
+    manejador(redis, ahora_ms=reloj_de(AHORA, AHORA + 30))(Canal(), *muerta(tarea(intento=4)))  # agota en 30 ms
+
+    assert [d - a for d, a in zip(metricas_del_reasignador(), antes)] == [1, 1, 0, 0, pytest.approx(0.03)]
+
+
+class CanalQueRechaza(Canal):
+    """El broker rechaza la publicación (un NackError, por ejemplo): consumir haría nack."""
+
+    def basic_publish(self, exchange, routing_key, body, properties=None):
+        raise ValueError("el broker rechazó la publicación")
+
+
+def reloj_de(*instantes):
+    pendientes = list(instantes)
+    return lambda: pendientes.pop(0) if len(pendientes) > 1 else pendientes[0]
+
+
+def test_un_reintento_que_va_a_la_dlq_cuenta_como_error(redis):
+    preparar_job(redis)
+    antes = metricas_del_reasignador()
+
+    with pytest.raises(ValueError):
+        manejador(redis)(CanalQueRechaza(), *muerta(tarea(intento=1)))
+
+    assert [d - a for d, a in zip(metricas_del_reasignador(), antes)] == [0, 0, 0, 1, 0]
+
+
+def test_un_mensaje_ilegible_cuenta_como_error_y_los_descartes_no_cuentan(redis):
+    preparar_job(redis, estado="done")
+    antes = metricas_del_reasignador()
+
+    manejador(redis)(Canal(), b"no es json", muerta(tarea())[1])
+    manejador(redis)(Canal(), *muerta(tarea()))  # tarea de un job terminado
+    manejador(redis)(Canal(), *muerta({**tarea(), "job_id": "vencido"}))
+    manejador(redis)(Canal(), *muerta(DEL_SPLIT[0], cola="sobel.split"))
+    manejador(redis)(Canal(), *muerta(DEL_JOINER[0], cola="sobel.joiner"))
+
+    assert [d - a for d, a in zip(metricas_del_reasignador(), antes)] == [0, 0, 1, 0, 0]

@@ -6,7 +6,7 @@ import signal
 import sys
 import time
 
-from comun import claves, colas, conexion, pixeles, registro, salud
+from comun import claves, colas, conexion, metricas, pixeles, registro, salud
 
 
 # Suman una fila de borde por lado (contrato §10): las dos son 3×3.
@@ -58,6 +58,10 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
     """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada job; lo que escribe vence en `ttl` s."""
 
     def procesar(canal, cuerpo):
+        with metricas.fallos("split", "split"):  # lo que lance va a la DLQ y cuenta como error (contrato §11)
+            repartir(canal, cuerpo)
+
+    def repartir(canal, cuerpo):
         inicio = ahora_ms()
         job_id = json.loads(cuerpo)["job_id"]
         clave_job = claves.job(job_id)
@@ -82,6 +86,8 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
                 mensaje = f"el archivo {archivo} no se pudo decodificar"
                 fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora_ms())
                 log.warning("job %s: %s, queda en failed", job_id, mensaje)
+                metricas.fallo("split", "split")
+                metricas.ERRORES.labels("split", "ARCHIVO_INVALIDO").inc()
                 return
             fragmentos = pixeles.dividir(matriz, partes, filas_de_borde)
             for f, (franja, _, _) in enumerate(fragmentos):
@@ -103,6 +109,7 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
         # Recién ahora: fuera de queued, un redelivery ya no las necesita (contrato §10: las borra el split).
         redis.delete(*claves_de_entrada(job_id, archivos))
         log.info("job %s: %d fragmentos a %s en %d ms", job_id, len(tareas), cola, t_split_ms)
+        metricas.trabajo("split", "split", t_split_ms / 1000)
 
     return procesar
 
@@ -129,7 +136,7 @@ def main():
     conexion.con_backoff(redis.ping, "redis", log=log)
     log.info("split consumiendo %s, %d partes por archivo", colas.SPLIT, partes)
     conexion.consumir(colas.SPLIT, manejador(redis, partes, ttl, log=log), al_conectar=colas.declarar,
-                      cliente_redis=redis, log=log)
+                      cliente_redis=redis, servicio="split", log=log)
 
 
 if __name__ == "__main__":

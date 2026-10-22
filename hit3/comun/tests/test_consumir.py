@@ -1,8 +1,10 @@
+import json
 from types import SimpleNamespace
 
 import pika.exceptions
 import pytest
 import redis.exceptions
+from prometheus_client import REGISTRY
 
 from comun import conexion
 
@@ -187,3 +189,38 @@ def test_consume_la_cola_que_devuelve_al_conectar_y_la_renueva_al_reconectar():
 
     assert antes.cola == "amq.gen-primera"
     assert despues.cola == "amq.gen-segunda"
+
+
+def errores(servicio, tipo):
+    """El contador es global (el de Prometheus): los tests miran cuánto sumó."""
+    return REGISTRY.get_sample_value("sobel_errores_total", {"servicio": servicio, "tipo": tipo}) or 0
+
+
+class TiempoAgotado(Exception):
+    pass
+
+
+def test_cuenta_cada_nack_por_el_nombre_de_su_excepcion_y_cada_caida_de_redis():
+    canal = CanalFalso([b"lento", b"redis", b"lento"])
+    antes = errores("worker", "TIEMPO_AGOTADO"), errores("worker", "REDIS_CAIDO")
+
+    def procesar(c, cuerpo):
+        raise TiempoAgotado() if cuerpo == b"lento" else redis.exceptions.ConnectionError("redis caído")
+
+    with pytest.raises(Fin):
+        conexion.consumir("sobel.tareas.x", procesar, servicio="worker", cliente_redis=RedisFalso(caidas=0),
+                          conectar=lambda: ConexionFalsa(canal))
+
+    assert errores("worker", "TIEMPO_AGOTADO") - antes[0] == 2
+    assert errores("worker", "REDIS_CAIDO") - antes[1] == 1
+
+
+def test_el_tipo_de_un_error_con_siglas_no_las_parte_letra_por_letra():
+    canal = CanalFalso([b"{roto"])
+    antes = errores("split", "JSON_DECODE_ERROR")
+
+    with pytest.raises(Fin):
+        conexion.consumir("sobel.split", lambda c, cuerpo: json.loads(cuerpo), servicio="split",
+                          conectar=lambda: ConexionFalsa(canal))
+
+    assert errores("split", "JSON_DECODE_ERROR") - antes == 1

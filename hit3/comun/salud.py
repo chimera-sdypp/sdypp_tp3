@@ -1,9 +1,10 @@
-"""GET /health de cada servicio (contrato §12), en un hilo aparte del consumo."""
+"""GET /health y GET /metrics de cada servicio (contrato §11 y §12), en un hilo aparte del consumo."""
 
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from comun import metricas
 from comun.conexion import CAIDO, OK
 
 CONEXIONES = ("rabbitmq", "redis")
@@ -29,7 +30,12 @@ def servir(servicio, puerto, estado, redis=None):
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.path != "/health":
+            ruta = self.path.split("?", 1)[0]
+            if ruta == "/metrics":  # responde aunque las conexiones estén caídas: es cuando más sirve
+                tipo, cuerpo = metricas.exponer()
+                self._enviar(200, tipo, cuerpo)
+                return
+            if ruta != "/health":
                 self._responder(404, {"error": f"no existe la ruta {self.path}"})
                 return
             actual = conexiones()
@@ -37,9 +43,11 @@ def servir(servicio, puerto, estado, redis=None):
                             {servicio: OK, **actual})
 
         def _responder(self, codigo, contenido):
-            cuerpo = json.dumps(contenido).encode()
+            self._enviar(codigo, "application/json", json.dumps(contenido).encode())
+
+        def _enviar(self, codigo, tipo, cuerpo):
             self.send_response(codigo)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", tipo)
             self.send_header("Content-Length", str(len(cuerpo)))
             self.end_headers()
             self.wfile.write(cuerpo)

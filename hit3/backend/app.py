@@ -20,10 +20,10 @@ from backend import auth, jobs, validacion
 from backend.config import Config
 from backend.errores import ErrorApi, respuesta_de_error, sobre
 from backend.rabbit import NoDisponible, Rabbit
-from comun import colas, registro
+from comun import colas, metricas, registro
 
 PEDIDOS = Counter("sobel_pedidos_total", "Pedidos HTTP al backend", ["ruta", "codigo"])
-ERRORES = Counter("sobel_errores_total", "Errores por tipo", ["servicio", "tipo"])
+ERRORES = metricas.ERRORES  # el común: registrarlo dos veces en el proceso no arranca
 EN_COLA = Gauge("sobel_tareas_en_cola", "Mensajes en cada cola", ["cola"])
 CADA = 10  # segundos entre actualizaciones de sobel_tareas_en_cola (y latidos a RabbitMQ)
 
