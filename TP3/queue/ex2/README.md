@@ -10,10 +10,10 @@ En este patrón, el publicador emite mensajes hacia un *Exchange* fanout sin esp
 
 ```mermaid
 flowchart LR
-    P[PUBLISHER\n(Emite 'Nuevo Bloque')] -->|basic_publish| EX{FANOUT EXCHANGE\nblockchain_events}
-    EX -->|copia 1| Q1[(Cola Temp Q1)] --> N1[SUBSCRIBER 1\nNodo-Red-1]
-    EX -->|copia 2| Q2[(Cola Temp Q2)] --> N2[SUBSCRIBER 2\nNodo-Red-2]
-    EX -->|copia 3| Q3[(Cola Temp Q3)] --> N3[SUBSCRIBER 3\nNodo-Red-3]
+    P["PUBLISHER<br/>(Emite 'Nuevo Bloque')"] -->|basic_publish| EX{"FANOUT EXCHANGE<br/>blockchain_events"}
+    EX -->|copia 1| Q1[("Cola Temp Q1")] --> N1["SUBSCRIBER 1<br/>Nodo-Red-1"]
+    EX -->|copia 2| Q2[("Cola Temp Q2")] --> N2["SUBSCRIBER 2<br/>Nodo-Red-2"]
+    EX -->|copia 3| Q3[("Cola Temp Q3")] --> N3["SUBSCRIBER 3<br/>Nodo-Red-3"]
 ```
 
 ![Patrón 2 - Pub/Sub Fan-out](../assets/patron2_pub_sub.png)
@@ -80,9 +80,10 @@ cd TP3/queue/ex2
 
 Los manifiestos en la carpeta `k8s/` despliegan el broker, 3 réplicas de nodos suscriptores y el Job emisor:
 
-1. **Construir la imagen de la aplicación:**
+1. **Construir la imagen e importarla a k3s** (k3s usa containerd, no ve las imágenes locales de Docker):
    ```bash
    docker build -t sdypp/ex2-app:latest .
+   docker save sdypp/ex2-app:latest | sudo k3s ctr images import -
    ```
 
 2. **Desplegar RabbitMQ y el Service:**

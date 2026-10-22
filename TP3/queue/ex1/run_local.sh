@@ -9,11 +9,8 @@ echo "  Hit #0 - Ejemplo 1: Message Queue (Punto a Punto)"
 echo "=========================================================="
 
 echo "[1/5] Levantando RabbitMQ..."
-docker compose up -d rabbitmq
-echo "Esperando que RabbitMQ esté listo..."
-until docker compose exec -T rabbitmq rabbitmq-diagnostics -q ping >/dev/null 2>&1; do
-    sleep 1
-done
+# --wait bloquea hasta que el healthcheck del compose (rabbitmq-diagnostics ping) da healthy
+docker compose up -d --wait rabbitmq
 echo "RabbitMQ está saludable."
 
 echo ""
