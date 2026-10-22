@@ -18,7 +18,7 @@ ARGUMENTOS_QUORUM = {"x-queue-type": "quorum"}
 
 def argumentos_con_dlq():
     """Quorum con dead-letter a la DLQ: lo que un consumidor rechaza (nack sin reencolar) o lo que lo tira abajo más
-    veces que SOBEL_LIMITE_ENTREGAS (crash, OOM) va a sobel.dlq en vez de reintentarse para siempre.
+    veces que SOBEL_LIMITE_ENTREGAS (crash, OOM) va a sobel.dlq en vez de reintentarse para siempre (§9).
 
     La routing key fija hace que una sola atadura de la DLQ sirva para todas las colas; sin ella, el mensaje conserva
     la key de su cola y el exchange direct lo tira.

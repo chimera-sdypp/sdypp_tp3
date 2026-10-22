@@ -1,5 +1,5 @@
 """Joiner: cuenta cada fragmento completo de sobel.joiner, une cada archivo cuando están todos y cierra el job
-en done."""
+en done, en el orden del contrato (§10, que el joiner una cada archivo una sola vez)."""
 
 import json
 import logging
@@ -124,7 +124,7 @@ def main():
 
     def apagar(senal, _frame):
         # Como en el split y el worker: sin handler, como PID 1 del contenedor ignoraría el SIGTERM. El fragmento en
-        # curso queda sin ack y RabbitMQ lo reentrega; cada paso del manejador soporta la reentrega.
+        # curso queda sin ack y RabbitMQ lo reentrega; cada paso del manejador la soporta (contrato §10).
         log.info("%s: el joiner termina; si había un fragmento en curso, RabbitMQ lo reentrega",
                  signal.Signals(senal).name)
         sys.exit(0)
