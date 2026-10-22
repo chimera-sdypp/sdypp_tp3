@@ -24,6 +24,15 @@ def leer_rgb(datos):
         raise ValueError("no se pudo decodificar") from None
 
 
+def leer(datos):
+    """Bytes PNG → matriz uint8 con los canales que tenga: alto × ancho para un canal, alto × ancho × 3 para RGB.
+
+    A diferencia de `leer_rgb`, no normaliza: el worker recibe lo que dejó el paso anterior.
+    """
+    with Image.open(io.BytesIO(datos)) as imagen:
+        return np.asarray(imagen)
+
+
 def dividir(matriz, partes, filas_de_borde):
     """Parte en `partes` franjas horizontales con `filas_de_borde` filas extra arriba y abajo (si existen).
 

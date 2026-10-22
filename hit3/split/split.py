@@ -15,9 +15,6 @@ from comun import claves, colas, conexion, pixeles, registro, salud
 OPERACIONES_DE_VECINDAD = {"sobel", "blur"}
 
 
-TTL_POR_DEFECTO = 86400  # SOBEL_TTL: las claves de un job viven 24 h (contrato §10)
-
-
 def ahora_en_ms():
     return int(time.time() * 1000)
 
@@ -58,7 +55,7 @@ def pasar_a_processing(redis, job_id, t_split_ms):
     redis.transaction(escribir, clave_job)
 
 
-def manejador(redis, partes, ttl=TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split")):
+def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split")):
     """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada job; lo que escribe vence en `ttl` s."""
 
     def procesar(canal, cuerpo):
@@ -133,7 +130,7 @@ def main():
 
     signal.signal(signal.SIGTERM, apagar)
     partes = entero_de_entorno("SOBEL_PARTES", 4, 1)
-    ttl = entero_de_entorno("SOBEL_TTL", TTL_POR_DEFECTO, 1)
+    ttl = entero_de_entorno("SOBEL_TTL", claves.TTL_POR_DEFECTO, 1)
     puerto = entero_de_entorno("SOBEL_PUERTO", 8080, 1)
     redis = conexion.cliente_redis()
     # Antes de conectarse: mientras espera con backoff, la probe ve `caido` en vez de no tener respuesta.

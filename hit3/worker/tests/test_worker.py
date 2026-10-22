@@ -62,7 +62,8 @@ def cargar_tarea(redis, fragmento, operaciones=cadena("grises"), paso=0, job_id=
 
 
 def manejador(redis, **opciones):
-    opciones = {"nombre": "w1", "ahora_ms": reloj(1761055391100, 1761055391512), **opciones}
+    # Recibe la tarea, 200 ms después (leer y decodificar) empieza la operación, que tarda 412 ms.
+    opciones = {"nombre": "w1", "ahora_ms": reloj(1761055391100, 1761055391300, 1761055391712), **opciones}
     return worker.manejador(redis, **opciones)
 
 
@@ -89,7 +90,7 @@ def test_el_ultimo_paso_publica_el_resultado_en_el_fanout(redis):
 def test_suma_sus_tiempos_a_los_del_job_y_se_anota_entre_sus_workers(redis):
     redis.hset("job:j1", mapping={"cola_ms": 50, "cola_n": 2, "proc_ms": 1000, "proc_n": 2})
     redis.sadd("job:j1:workers", "w0")
-    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), encolado=1761055391000)  # lo toma a los 100 ms; tarda 412
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), encolado=1761055391000)  # espera 100 ms en la cola; tarda 412
 
     manejador(redis)(CanalQuePublica(), cuerpo)
 

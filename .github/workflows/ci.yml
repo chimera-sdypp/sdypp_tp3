@@ -126,6 +126,7 @@ jobs:
         run: PYTHON=python bash tests/tolerancia.sh
 
   hit3:
+    # También corre el worker, pero el nombre es un check obligatorio de dev: cambiarlo traba los PR.
     name: Hit 3 — comun y split
     runs-on: ubuntu-latest
     defaults:
@@ -142,7 +143,6 @@ jobs:
         run: python -m pytest -v comun
       - name: Tests del split
         run: python -m pytest -v split
-      # El nombre del job queda "comun y split": es un check obligatorio de dev y cambiarlo traba los PR.
       - name: Tests del worker
         run: python -m pytest -v worker
 

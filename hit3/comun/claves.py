@@ -3,6 +3,8 @@ sólo hace que un servicio no encuentre lo que escribió otro."""
 
 TERMINADOS = "terminados"
 
+TTL_POR_DEFECTO = 86400  # SOBEL_TTL: las claves de un job viven 24 h
+
 
 def job(job_id):
     return f"job:{job_id}"
