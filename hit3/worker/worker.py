@@ -13,7 +13,7 @@ from comun import claves, colas, conexion, pixeles, registro, salud
 from worker.operaciones import OPERACIONES
 
 VIGENCIA_DEL_ANUNCIO = 15  # s: si el worker deja de anunciarse, deja de contar como activo (contrato §10)
-CADA_CUANTO_ANUNCIAR = 5
+CADA_CUANTO_ANUNCIAR = 5  # s
 
 
 def ahora_en_ms():
@@ -37,13 +37,13 @@ def manejador(redis, nombre, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
         if siguiente < len(tarea["operaciones"]):
             # Cada paso es una tarea nueva, con sus propios reintentos. Se declara antes de publicar por si
             # todavía no arrancó ningún worker de esa imagen (contrato §9).
-            cola = colas.declarar_tareas(canal, tarea["operaciones"][siguiente]["imagen"])
-            colas.publicar(canal, cola, {**tarea, "paso": siguiente, "intento": 1, "encolado": ahora_ms()})
+            destino = colas.declarar_tareas(canal, tarea["operaciones"][siguiente]["imagen"])
+            colas.publicar(canal, destino, {**tarea, "paso": siguiente, "intento": 1, "encolado": ahora_ms()})
         else:
-            cola = colas.RESULTADOS
+            destino = colas.RESULTADOS
             colas.publicar(canal, "", {"job_id": job_id, "archivo": archivo, "fragmento": indice, "worker": nombre,
                                        "ms": proc_ms, "intento": tarea["intento"]}, exchange=colas.RESULTADOS)
-        log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s", job_id, archivo, indice, operacion, proc_ms, cola)
+        log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s", job_id, archivo, indice, operacion, proc_ms, destino)
         clave_job = claves.job(job_id)
         with redis.pipeline() as transaccion:  # sumas y cantidades para los promedios de tiempos_s (contrato §3)
             transaccion.hincrby(clave_job, "cola_ms", recibida - tarea["encolado"])
@@ -73,14 +73,19 @@ def anunciar_siempre(redis, nombre, imagen, operaciones, log):
     while True:
         try:
             anunciar(redis, nombre, imagen, operaciones)
-        except Exception as error:  # Redis caído: se reintenta en la próxima vuelta
+        except conexion.ERRORES_DE_CONEXION as error:  # Redis caído: se reintenta en la próxima vuelta
             log.warning("no se pudo renovar el anuncio del worker (%s)", error)
+        except Exception:
+            # Cualquier otra cosa también se reintenta, pero con el traceback: sin anuncio el backend
+            # contesta SIN_WORKERS aunque el worker siga consumiendo.
+            log.exception("no se pudo renovar el anuncio del worker")
         time.sleep(CADA_CUANTO_ANUNCIAR)
 
 
 def operaciones_de_entorno():
     """SOBEL_OPERACIONES (contrato §12). Una operación que el worker no conoce corta el arranque."""
-    ofrecidas = [op.strip() for op in os.environ.get("SOBEL_OPERACIONES", "sobel,grises,blur").split(",") if op.strip()]
+    pedidas = os.environ.get("SOBEL_OPERACIONES", "sobel,grises,blur").split(",")
+    ofrecidas = list(dict.fromkeys(op.strip() for op in pedidas if op.strip()))  # sin repetidas, en orden
     desconocidas = sorted(set(ofrecidas) - set(OPERACIONES))
     if not ofrecidas or desconocidas:
         raise RuntimeError(f"SOBEL_OPERACIONES tiene que nombrar operaciones de {sorted(OPERACIONES)} "

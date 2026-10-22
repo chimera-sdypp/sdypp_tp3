@@ -66,6 +66,7 @@ def variable_obligatoria(nombre):
 
 
 def entero_de_entorno(nombre, por_defecto, minimo):
+    """Un entero de la configuración (contrato §12); fuera de rango corta el arranque."""
     valor = int(os.environ.get(nombre, por_defecto))
     if valor < minimo:
         raise RuntimeError(f"{nombre} tiene que ser al menos {minimo} (llegó {valor})")
