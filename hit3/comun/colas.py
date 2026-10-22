@@ -12,6 +12,7 @@ DLQ = "sobel.dlq"
 AGOTADOS = "sobel.dlq.agotados"
 RESULTADOS = "sobel.resultados"
 JOINER = "sobel.joiner"
+PREFIJO_TAREAS = "sobel.tareas."  # + la referencia de la imagen de worker
 
 ARGUMENTOS_QUORUM = {"x-queue-type": "quorum"}
 
@@ -46,7 +47,7 @@ def declarar(canal):
 
 def declarar_tareas(canal, imagen_worker):
     """Declara la cola de tareas de una imagen de worker, con dead-letter a la DLQ, y devuelve su nombre."""
-    cola = f"sobel.tareas.{imagen_worker}"
+    cola = f"{PREFIJO_TAREAS}{imagen_worker}"
     canal.queue_declare(cola, durable=True, arguments=argumentos_con_dlq())
     return cola
 

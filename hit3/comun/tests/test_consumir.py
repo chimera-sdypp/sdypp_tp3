@@ -14,9 +14,10 @@ class Fin(Exception):
 class CanalFalso:
     """Imita lo que `consumir` usa de un canal de pika y entrega `mensajes` en orden."""
 
-    def __init__(self, mensajes, al_vaciarse=Fin):
+    def __init__(self, mensajes, al_vaciarse=Fin, propiedades=None):
         self.mensajes = list(mensajes)
         self.al_vaciarse = al_vaciarse
+        self.propiedades = propiedades
         self.acks, self.nacks = [], []
         self.eventos = []
 
@@ -32,7 +33,7 @@ class CanalFalso:
 
     def start_consuming(self):
         for tag, cuerpo in enumerate(self.mensajes, start=1):
-            self.entregar(self, SimpleNamespace(delivery_tag=tag), None, cuerpo)
+            self.entregar(self, SimpleNamespace(delivery_tag=tag), self.propiedades, cuerpo)
         if self.al_vaciarse:
             raise self.al_vaciarse()
 
@@ -63,6 +64,19 @@ def test_ack_si_el_callback_termina_bien():
     assert canal.cola == "sobel.tareas.grises"
     assert canal.acks == [1, 2]
     assert canal.nacks == []
+
+
+def test_con_propiedades_el_callback_recibe_tambien_las_del_mensaje():
+    propiedades = SimpleNamespace(headers={"x-first-death-queue": "sobel.joiner"})
+    canal = CanalFalso([b"tarea 1"], propiedades=propiedades)
+    recibidos = []
+
+    with pytest.raises(Fin):
+        conexion.consumir("sobel.dlq", lambda c, cuerpo, props: recibidos.append((cuerpo, props)),
+                          con_propiedades=True, conectar=lambda: ConexionFalsa(canal))
+
+    assert recibidos == [(b"tarea 1", propiedades)]
+    assert canal.acks == [1]
 
 
 def test_nack_sin_reencolar_si_el_callback_falla_y_sigue_con_el_proximo():
