@@ -58,4 +58,5 @@ def test_cada_operacion_devuelve_sus_canales_naturales(operacion, canales_de_ent
 
     salida = operaciones.OPERACIONES[operacion](entrada)
 
-    assert salida.shape == forma_de_salida and salida.dtype == np.uint8
+    assert salida.shape == forma_de_salida
+    assert salida.dtype == np.uint8

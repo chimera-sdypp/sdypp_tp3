@@ -234,7 +234,11 @@ def test_una_cadena_de_varios_pasos_llega_entera_a_los_resultados(redis, imagene
 
 
 def aplicar_entera(original, operaciones):
-    """La cadena aplicada a la imagen entera, sin partir: la referencia del procesamiento distribuido."""
+    """La cadena aplicada a la imagen entera, sin partir: la referencia del procesamiento distribuido.
+
+    Usa las mismas operaciones que el worker a propósito: este test mide que partir y recortar los bordes no cambie
+    nada. Que cada operación esté bien lo prueban los tests de operaciones (y el Sobel, contra el Hit 1).
+    """
     resultado = original
     for paso in operaciones:
         resultado = OPERACIONES[paso["operacion"]](resultado)
@@ -242,6 +246,7 @@ def aplicar_entera(original, operaciones):
 
 
 @pytest.mark.parametrize("nombres", [
+    ["grises"],  # ninguna operación de vecindad: sin filas de borde
     ["sobel"], ["blur"], ["grises", "blur"],  # una operación de vecindad: una fila de borde
     ["blur", "sobel"], ["blur", "grises", "sobel"],  # dos: dos filas de borde
 ], ids=lambda nombres: "_".join(nombres))
