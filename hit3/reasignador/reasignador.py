@@ -1,4 +1,6 @@
-"""Reasignador: consume sobel.dlq y vuelve a encolar cada tarea que falló, con un intento más (contrato §9)."""
+"""Reasignador: consume sobel.dlq. Vuelve a encolar cada tarea que falló, con un intento más; la que agotó los
+reintentos va a sobel.dlq.agotados y su job a `dlq`; un job del split o un fragmento completo del joiner pasan el job
+a `failed` (contrato §9 y §10)."""
 
 import json
 import logging
@@ -83,26 +85,85 @@ def reintentar(canal, redis, tarea, ahora_ms):
     return intento
 
 
+def agotar(canal, redis, tarea, motivo, ahora_ms):
+    """Manda la tarea tal cual a sobel.dlq.agotados (el backend le pone intento 1 al reprocesarla) y pasa el job a
+    `dlq` (contrato §10).
+
+    Publica primero, por lo mismo que `reintentar`. Si se cae antes del ack, la reentrega publica otra copia: después
+    de la transacción, `en_dlq` también suma dos veces y la cuenta cierra al reprocesar; antes de la transacción,
+    `en_dlq` queda en 1 con dos copias y el backend, al reprocesar, lo deja en -1. Perder la tarea sería peor.
+    """
+    colas.publicar(canal, colas.AGOTADOS, tarea)
+    operacion = tarea["operaciones"][tarea["paso"]]["operacion"]
+    explicacion = (f"la tarea de {operacion} del fragmento {tarea['fragmento']} del archivo {tarea['archivo']} agotó "
+                   f"los reintentos ({motivo})")
+    pasar_a(redis, tarea["job_id"], "dlq", {"tipo": "REINTENTOS_AGOTADOS", "mensaje": explicacion}, ahora_ms,
+            suma_en_dlq=True)
+
+
+def pasar_a(redis, job_id, destino, error, ahora_ms, suma_en_dlq=False):
+    """Pasa el job a `destino` (`dlq` o `failed`) con `error`, `terminado` y la entrada en `terminados`, todo junto,
+    y con `suma_en_dlq` suma 1 a `en_dlq`. Una sola vez: si ya está en `destino`, sólo suma. `done` y `failed` son
+    finales (contrato §3) y no cambian, pero `en_dlq` suma igual: cuenta lo que quedó en sobel.dlq.agotados, y el
+    backend lo resta al reprocesar sin cambiarle el estado. El WATCH reintenta si el job cambia en el medio.
+
+    Devuelve el estado en que quedó el job, o None si venció.
+    """
+    clave_job = claves.job(job_id)
+
+    def escribir(transaccion):
+        actual, creado = transaccion.hmget(clave_job, "estado", "creado")
+        if actual is None:  # venció: un HINCRBY o un HSET lo recrearían sin TTL
+            return None
+        cambia = actual not in (b"done", b"failed", destino.encode())
+        transaccion.multi()
+        if suma_en_dlq:
+            transaccion.hincrby(clave_job, "en_dlq", 1)
+        if cambia:
+            terminado = ahora_ms()
+            transaccion.hset(clave_job, mapping={"estado": destino, "error": json.dumps(error), "terminado": terminado})
+            transaccion.lpush(claves.TERMINADOS, f"{destino} {terminado - int(creado)}")
+            transaccion.ltrim(claves.TERMINADOS, 0, 999)
+        return destino if cambia else actual.decode()
+
+    return redis.transaction(escribir, clave_job, value_from_callable=True)
+
+
 def manejador(redis, reintentos_max, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.reasignador")):
     """Devuelve el callback(canal, cuerpo, propiedades) que `consumir` llama por cada mensaje de sobel.dlq."""
 
     def procesar(canal, cuerpo, propiedades):
         try:
             origen, mensaje, motivo = leer(cuerpo, propiedades)
-        except Ilegible as error:
+        except Ilegible as problema:
             # sobel.dlq no tiene DLX: un nack lo descartaría igual, así que se descarta con el detalle en el log.
-            log.error("mensaje ilegible en %s, se descarta: %s", colas.DLQ, error)
+            log.error("mensaje ilegible en %s, se descarta: %s", colas.DLQ, problema)
             return
         job_id = mensaje["job_id"]
-        if not redis.exists(claves.job(job_id)):
+        estado_actual = redis.hget(claves.job(job_id), "estado")
+        if estado_actual is None:
             # Ni reintentarlo ni marcar el job lo arreglan: venció.
             log.warning("job %s no existe, se descarta un mensaje de %s", job_id, origen)
             return
         if origen == TAREA:
-            intento = reintentar(canal, redis, mensaje, ahora_ms)
-            log.info("job %s: archivo %d, fragmento %d, paso %d (%s): intento %d", job_id, mensaje["archivo"],
-                     mensaje["fragmento"], mensaje["paso"], motivo, intento)
+            if estado_actual in (b"done", b"failed"):
+                # Reintentarla ya no sirve: el job terminó (por ejemplo, el joiner lo pasó a failed).
+                log.warning("job %s ya está en %s, se descarta una tarea del archivo %d", job_id,
+                            estado_actual.decode(), mensaje["archivo"])
+            elif mensaje["intento"] <= reintentos_max:
+                intento = reintentar(canal, redis, mensaje, ahora_ms)
+                log.info("job %s: archivo %d, fragmento %d, paso %d (%s): intento %d", job_id, mensaje["archivo"],
+                         mensaje["fragmento"], mensaje["paso"], motivo, intento)
+            else:
+                agotar(canal, redis, mensaje, motivo, ahora_ms)
+                log.warning("job %s: el fragmento %d del archivo %d agotó los reintentos en el paso %d (%s), va a %s",
+                            job_id, mensaje["fragmento"], mensaje["archivo"], mensaje["paso"], motivo, colas.AGOTADOS)
         else:
-            log.warning("job %s: llegó un mensaje de %s a la DLQ (%s), se descarta", job_id, origen, motivo)
+            # Un job del split o un fragmento completo del joiner no se arreglan reintentando (contrato §9).
+            servicio = "split" if origen == colas.SPLIT else "joiner"
+            error_del_job = {"tipo": "ERROR_INTERNO", "mensaje": f"falló en el {servicio} ({motivo})"}
+            quedo = pasar_a(redis, job_id, "failed", error_del_job, ahora_ms)
+            # Pasa a failed, o ya estaba en failed o en done (otro servicio lo terminó), o venció en el medio.
+            log.warning("job %s: falló en el %s (%s), queda en %s", job_id, servicio, motivo, quedo or "nada: venció")
 
     return procesar

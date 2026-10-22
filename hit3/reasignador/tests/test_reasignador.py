@@ -139,8 +139,8 @@ def test_si_se_cae_rabbitmq_al_publicar_el_reintento_no_lo_cuenta(redis):
     assert redis.hget("job:j1", "reintentos") == b"0"
 
 
-class VenceAntesDeSumar:
-    """El Redis de verdad, salvo que el job vence justo después de publicar el reintento."""
+class VenceAntesDeEscribir:
+    """El Redis de verdad, salvo que el job vence justo antes de la transacción que lo escribe."""
 
     def __init__(self, redis):
         self.redis = redis
@@ -153,9 +153,156 @@ class VenceAntesDeSumar:
         return self.redis.transaction(*args, **opciones)
 
 
-def test_si_el_job_vence_justo_despues_de_publicar_no_lo_recrea(redis):
+def test_si_el_job_vence_justo_despues_de_publicar_el_reintento_no_lo_recrea(redis):
     preparar_job(redis)
 
-    manejador(VenceAntesDeSumar(redis))(Canal(), *muerta(tarea()))
+    manejador(VenceAntesDeEscribir(redis))(Canal(), *muerta(tarea()))
+
+    assert redis.keys() == []
+
+
+def error_de(redis):
+    return json.loads(redis.hget("job:j1", "error"))
+
+
+def test_una_tarea_que_agoto_los_reintentos_va_a_agotados_y_el_job_pasa_a_dlq(redis, caplog):
+    preparar_job(redis)
+    canal = Canal()
+
+    manejador(redis, reintentos_max=3)(canal, *muerta(tarea(intento=4), motivo="delivery_limit"))
+
+    assert canal.eventos == [("publicar", "sobel.dlq.agotados", tarea(intento=4))]  # tal cual: el backend la reprocesa
+    assert redis.hmget("job:j1", "estado", "en_dlq", "terminado", "reintentos") == [
+        b"dlq", b"1", b"1761055399000", b"0"]
+    assert error_de(redis) == {"tipo": "REINTENTOS_AGOTADOS", "mensaje":
+                               "la tarea de sobel del fragmento 3 del archivo 0 agotó los reintentos (delivery_limit)"}
+    assert redis.lrange("terminados", 0, -1) == [b"dlq 8000"]  # terminado − creado
+    assert [r.levelname for r in caplog.records] == ["WARNING"] and "agotó los reintentos" in caplog.text
+
+
+@pytest.mark.parametrize("estado", ["done", "failed"])
+@pytest.mark.parametrize("intento", [1, 4], ids=["con_reintentos", "agotada"])
+def test_una_tarea_de_un_job_terminado_no_se_reintenta_ni_se_agota(redis, estado, intento):
+    preparar_job(redis, estado=estado)
+    antes = redis.hgetall("job:j1")
+    canal = Canal()
+
+    manejador(redis, reintentos_max=3)(canal, *muerta(tarea(intento=intento)))
+
+    assert canal.eventos == [] and redis.hgetall("job:j1") == antes and redis.lrange("terminados", 0, -1) == []
+
+
+DEL_SPLIT = ({"job_id": "j1"}, "sobel.split", "falló en el split (rejected)")
+DEL_JOINER = ({"job_id": "j1", "archivo": 0, "fragmento": 2, "worker": "w1", "ms": 12, "intento": 1}, "sobel.joiner",
+              "falló en el joiner (rejected)")
+
+
+@pytest.mark.parametrize("mensaje, cola, explicacion", [DEL_SPLIT, DEL_JOINER], ids=["split", "joiner"])
+@pytest.mark.parametrize("estado", ["queued", "processing", "dlq"])
+def test_un_mensaje_del_split_o_del_joiner_pasa_el_job_a_failed_sin_reintentar(redis, caplog, estado, mensaje, cola,
+                                                                                explicacion):
+    preparar_job(redis, estado=estado)
+    canal = Canal()
+
+    manejador(redis)(canal, *muerta(mensaje, cola=cola))
+
+    assert canal.eventos == []
+    assert redis.hmget("job:j1", "estado", "terminado") == [b"failed", b"1761055399000"]
+    assert error_de(redis) == {"tipo": "ERROR_INTERNO", "mensaje": explicacion}
+    assert redis.lrange("terminados", 0, -1) == [b"failed 8000"]
+    assert [r.levelname for r in caplog.records] == ["WARNING"] and "queda en failed" in caplog.text
+
+
+@pytest.mark.parametrize("mensaje, cola, explicacion", [DEL_SPLIT, DEL_JOINER], ids=["split", "joiner"])
+@pytest.mark.parametrize("estado", ["done", "failed"])
+def test_un_mensaje_del_split_o_del_joiner_no_toca_un_job_terminado(redis, estado, mensaje, cola, explicacion):
+    preparar_job(redis, estado=estado)
+    antes = redis.hgetall("job:j1")
+
+    manejador(redis)(Canal(), *muerta(mensaje, cola=cola))
+
+    assert redis.hgetall("job:j1") == antes and redis.lrange("terminados", 0, -1) == []
+
+
+def test_un_segundo_fragmento_agotado_del_mismo_job_solo_suma_a_en_dlq(redis):
+    preparar_job(redis)
+    manejador(redis)(Canal(), *muerta(tarea(intento=4)))
+    otra = {**tarea(intento=4), "fragmento": 1}
+    canal = Canal()
+
+    manejador(redis, ahora_ms=lambda: AHORA + 5000)(canal, *muerta(otra, motivo="delivery_limit"))
+
+    assert canal.eventos == [("publicar", "sobel.dlq.agotados", otra)]
+    assert redis.hmget("job:j1", "estado", "en_dlq", "terminado") == [b"dlq", b"2", b"1761055399000"]
+    assert "del fragmento 3 del archivo 0" in error_de(redis)["mensaje"]  # el primero, sin pisar
+    assert redis.lrange("terminados", 0, -1) == [b"dlq 8000"]
+
+
+def test_una_tarea_de_un_job_en_dlq_se_sigue_reintentando(redis):
+    preparar_job(redis, estado="dlq")
+    canal = Canal()
+
+    manejador(redis)(canal, *muerta(tarea(intento=1)))
+
+    assert canal.eventos[-1] == ("publicar", f"sobel.tareas.{SOBEL}", {**tarea(), "intento": 2, "encolado": AHORA})
+    assert redis.hmget("job:j1", "estado", "reintentos") == [b"dlq", b"1"]
+
+
+@pytest.mark.parametrize("mensaje, cola", [
+    (tarea(intento=4), f"sobel.tareas.{SOBEL}"), (DEL_JOINER[0], "sobel.joiner"),
+], ids=["agotada", "joiner"])
+def test_la_reentrega_del_mismo_mensaje_no_deja_otra_entrada_en_terminados(redis, mensaje, cola):
+    preparar_job(redis)
+    procesar = manejador(redis)
+
+    procesar(Canal(), *muerta(mensaje, cola=cola))
+    procesar(Canal(), *muerta(mensaje, cola=cola))
+
+    assert len(redis.lrange("terminados", 0, -1)) == 1
+
+
+class TerminaEnElMedio:
+    """El Redis de verdad, salvo que otro servicio termina el job justo antes de que el reasignador lo marque: por
+    ejemplo, el joiner lo cierra en done porque otra copia de la tarea (una reentrega) terminó bien."""
+
+    def __init__(self, redis, estado):
+        self.redis, self.estado = redis, estado
+
+    def __getattr__(self, nombre):
+        return getattr(self.redis, nombre)
+
+    def transaction(self, *args, **opciones):
+        self.redis.hset("job:j1", "estado", self.estado)
+        return self.redis.transaction(*args, **opciones)
+
+
+@pytest.mark.parametrize("estado", ["done", "failed"])
+def test_si_el_job_termina_en_el_medio_la_tarea_agotada_suma_a_en_dlq_pero_no_lo_pisa(redis, estado):
+    preparar_job(redis)
+
+    manejador(TerminaEnElMedio(redis, estado))(Canal(), *muerta(tarea(intento=4)))
+
+    # en_dlq cuenta lo que quedó en sobel.dlq.agotados: el backend lo resta al reprocesar.
+    assert redis.hmget("job:j1", "estado", "en_dlq", "terminado") == [estado.encode(), b"1", None]
+    assert redis.lrange("terminados", 0, -1) == []
+
+
+def test_terminados_guarda_los_ultimos_1000(redis):
+    preparar_job(redis)
+    redis.rpush("terminados", *[f"done {n}" for n in range(1000)])
+
+    manejador(redis)(Canal(), *muerta(DEL_SPLIT[0], cola="sobel.split"))
+
+    assert redis.llen("terminados") == 1000
+    assert redis.lrange("terminados", 0, 1) == [b"failed 8000", b"done 0"]
+
+
+@pytest.mark.parametrize("mensaje, cola", [
+    (tarea(intento=4), f"sobel.tareas.{SOBEL}"), (DEL_JOINER[0], "sobel.joiner"),
+], ids=["agotada", "joiner"])
+def test_si_el_job_vence_justo_antes_de_marcarlo_no_lo_recrea(redis, mensaje, cola):
+    preparar_job(redis)
+
+    manejador(VenceAntesDeEscribir(redis))(Canal(), *muerta(mensaje, cola=cola))
 
     assert redis.keys() == []
