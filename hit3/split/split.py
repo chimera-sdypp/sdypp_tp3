@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import signal
 import sys
 import time
@@ -110,13 +109,6 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
     return procesar
 
 
-def entero_de_entorno(nombre, por_defecto, minimo):
-    valor = int(os.environ.get(nombre, por_defecto))
-    if valor < minimo:
-        raise RuntimeError(f"{nombre} tiene que ser al menos {minimo} (llegó {valor})")
-    return valor
-
-
 def main():
     log, _ = registro.configurar("split")
 
@@ -129,9 +121,9 @@ def main():
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, apagar)
-    partes = entero_de_entorno("SOBEL_PARTES", 4, 1)
-    ttl = entero_de_entorno("SOBEL_TTL", claves.TTL_POR_DEFECTO, 1)
-    puerto = entero_de_entorno("SOBEL_PUERTO", 8080, 1)
+    partes = conexion.entero_de_entorno("SOBEL_PARTES", 4, 1)
+    ttl = conexion.entero_de_entorno("SOBEL_TTL", claves.TTL_POR_DEFECTO, 1)
+    puerto = conexion.entero_de_entorno("SOBEL_PUERTO", 8080, 1)
     redis = conexion.cliente_redis()
     # Antes de conectarse: mientras espera con backoff, la probe ve `caido` en vez de no tener respuesta.
     salud.servir("split", puerto, conexion.estado, redis=redis)

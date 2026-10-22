@@ -268,3 +268,12 @@ def test_sobel_distribuido_es_identico_al_centralizado_del_hit1(redis, sobel_hit
     procesar_job(redis, "j1", partes=4)
 
     np.testing.assert_array_equal(unir(redis, "j1", 0, paso=1), sobel_hit1.aplicar(sobel_hit1.leer_gris(png(original))))
+
+
+# Anuncio de worker activo (seam S8).
+
+def test_el_anuncio_deja_la_imagen_y_las_operaciones_del_worker_por_15_segundos(redis):
+    worker.anunciar(redis, "w1", IMAGEN, ["sobel", "grises"])
+
+    assert redis.hgetall("worker:w1") == {b"imagen": IMAGEN.encode(), b"operaciones": b"sobel,grises", b"host": b"w1"}
+    assert 0 < redis.ttl("worker:w1") <= 15
