@@ -23,7 +23,8 @@ def claves_de_entrada(job_id, archivos):
 
 def fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora):
     """Deja el job en `failed` con error ARCHIVO_INVALIDO y `terminado`, lo anota en `terminados` (los últimos 1000)
-    y borra las entradas. Todo junto: si se cortara en el medio, el redelivery vería `failed` y no completaría el resto."""
+    y borra las entradas. Todo junto: si se cortara en el medio, el redelivery vería `failed` y no completaría el
+    resto."""
     clave_job = claves.job(job_id)
     error = {"tipo": "ARCHIVO_INVALIDO", "mensaje": mensaje}
     total_ms = ahora - int(redis.hget(clave_job, "creado"))
