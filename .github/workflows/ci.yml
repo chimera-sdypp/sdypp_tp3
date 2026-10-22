@@ -137,11 +137,14 @@ jobs:
         with:
           python-version: "3.14"
       - name: Instalar dependencias
-        run: pip install -r comun/requirements-dev.txt -r split/requirements-dev.txt
+        run: pip install -r comun/requirements-dev.txt -r split/requirements-dev.txt -r worker/requirements-dev.txt
       - name: Tests de comun
         run: python -m pytest -v comun
       - name: Tests del split
         run: python -m pytest -v split
+      # El nombre del job queda "comun y split": es un check obligatorio de dev y cambiarlo traba los PR.
+      - name: Tests del worker
+        run: python -m pytest -v worker
 
   # Sólo al mergear a dev o a main, o con un tag v*: los PR prueban pero no publican.
   servicios:
