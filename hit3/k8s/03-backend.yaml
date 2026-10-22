@@ -76,7 +76,7 @@ spec:
             - name: SOBEL_PEDIDOS_POR_MINUTO
               value: "120"
             - name: SOBEL_IMAGENES_PERMITIDAS
-              value: "ghcr.io/chimera-sdypp/sobel-worker:1.0.0,ghcr.io/chimera-sdypp/grises-worker:1.0.0,ghcr.io/chimera-sdypp/blur-worker:1.0.0"
+              value: "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
             - name: SOBEL_SERVICIOS
               value: "split=http://split:8080/health,joiner=http://joiner:8080/health,reasignador=http://reasignador:8080/health,frontend=http://frontend:8080/health"
             - name: SOBEL_LIMITE_ENTREGAS

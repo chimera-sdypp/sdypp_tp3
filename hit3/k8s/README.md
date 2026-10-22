@@ -16,7 +16,7 @@ La arquitectura divide los pods en dos grupos de nodos mediante `nodeSelector` y
 2. **`sobel/apps=true` (Microservicios y procesamiento):**
    - **Backend Deployment:** 3 réplicas del API Gateway HTTP (`2Gi` RAM, puerto `8080`), validación previa de pedidos y métricas.
    - **Split Deployment:** divide imágenes entrantes en fragmentos con filas de borde (`2Gi` RAM para imágenes de hasta 100 megapíxeles).
-   - **Workers Deployments:** pods especializados por operación (`sobel-worker`, `grises-worker`, `blur-worker`) con `1Gi` RAM y Services headless para scraping de Prometheus.
+   - **Worker Deployment:** `sobel-worker`, que ofrece las tres operaciones (`sobel`, `grises`, `blur`), con `1Gi` RAM y un Service headless para scraping de Prometheus.
    - **Joiner Deployment:** 2 réplicas concurrentes (`2Gi` RAM) que consumen de `sobel.joiner`, coordinan la unión atómica en Redis y publican resultados.
    - **Reasignador Deployment:** consume la cola de fallos `sobel.dlq`, evalúa reintentos y deriva a `sobel.dlq.agotados` tras superar el umbral (`SOBEL_REINTENTOS_MAX: 3`).
    - **Frontend Deployment:** interfaz web y dashboard de progreso en vivo (puerto `8080`).
