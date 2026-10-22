@@ -16,9 +16,9 @@ def geometria(job_id, archivo):
     return f"job:{job_id}:geometria:{archivo}"
 
 
-def fragmento(job_id, archivo, fragmento, paso):
-    """El fragmento después de aplicar `paso` operaciones: el split escribe el paso 0."""
-    return f"job:{job_id}:frag:{archivo}:{fragmento}:{paso}"
+def fragmento(job_id, archivo, indice, paso):
+    """El fragmento `indice` del archivo después de aplicar `paso` operaciones: el split escribe el paso 0."""
+    return f"job:{job_id}:frag:{archivo}:{indice}:{paso}"
 
 
 def workers(job_id):
