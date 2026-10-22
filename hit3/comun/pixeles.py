@@ -52,6 +52,32 @@ def dividir(matriz, partes, filas_de_borde):
     return franjas
 
 
+def geometria(fragmentos):
+    """Lo que devuelve `dividir` → el hash `job:<id>:geometria:<a>` (contrato §10).
+
+    `total` y, por fragmento, `"<filas_extra_arriba>,<filas>"`: lo que el joiner necesita para recortar los bordes.
+    """
+    hash_geometria = {"total": len(fragmentos)}
+    for indice, (_, extra, filas) in enumerate(fragmentos):
+        hash_geometria[indice] = f"{extra},{filas}"
+    return hash_geometria
+
+
+def leer_geometria(hash_geometria):
+    """El hash de `geometria` (tal como vuelve de Redis) → [(filas_extra_arriba, filas)] en el orden de los fragmentos."""
+    texto = {_texto(clave): _texto(valor) for clave, valor in hash_geometria.items()}
+    return [tuple(map(int, texto[str(indice)].split(","))) for indice in range(int(texto["total"]))]
+
+
+def _texto(valor):
+    return valor.decode() if isinstance(valor, bytes) else str(valor)
+
+
+def unir(franjas, geometria_de_franjas):
+    """Recorta los bordes de cada franja según su (filas_extra_arriba, filas) y las apila en orden."""
+    return np.vstack([franja[extra:extra + filas] for franja, (extra, filas) in zip(franjas, geometria_de_franjas)])
+
+
 def a_png(matriz):
     salida = io.BytesIO()
     Image.fromarray(matriz).save(salida, format="PNG")
