@@ -3,9 +3,11 @@ en done."""
 
 import json
 import logging
+import signal
+import sys
 import time
 
-from comun import claves, pixeles
+from comun import claves, colas, conexion, pixeles, registro, salud
 
 
 def ahora_en_ms():
@@ -91,3 +93,30 @@ def manejador(redis, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=loggi
             log.info("job %s: done", job_id)
 
     return procesar
+
+
+def main():
+    log, _ = registro.configurar("joiner")
+
+    def apagar(senal, _frame):
+        # Como en el split y el worker: sin handler, como PID 1 del contenedor ignoraría el SIGTERM. El fragmento en
+        # curso queda sin ack y RabbitMQ lo reentrega; cada paso del manejador soporta la reentrega.
+        log.info("%s: el joiner termina; si había un fragmento en curso, RabbitMQ lo reentrega",
+                 signal.Signals(senal).name)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, apagar)
+    ttl = conexion.entero_de_entorno("SOBEL_TTL", claves.TTL_POR_DEFECTO, 1)
+    puerto = conexion.entero_de_entorno("SOBEL_PUERTO", 8080, 1)
+    redis = conexion.cliente_redis()
+    # Antes de conectarse: mientras espera con backoff, la probe ve `caido` en vez de no tener respuesta.
+    salud.servir("joiner", puerto, conexion.estado, redis=redis)
+    log.info("joiner: /health en el puerto %d", puerto)
+    conexion.con_backoff(redis.ping, "redis", log=log)
+    log.info("joiner consumiendo %s", colas.JOINER)
+    conexion.consumir(colas.JOINER, manejador(redis, ttl, log=log), al_conectar=colas.declarar,
+                      cliente_redis=redis, log=log)
+
+
+if __name__ == "__main__":
+    main()
