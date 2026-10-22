@@ -134,7 +134,7 @@ Kubernetes impuso el modelo de **IP por Pod** (*flat networking*), donde cada Po
 
 ## 5. Aplicación Práctica en Nuestro Proyecto (Grupo Cerberus)
 
-Los principios teóricos expuestos por Burns et al. guiaron de forma directa las decisiones de ingeniería implementadas en la infraestructura del **Hit #3** (21 recursos de Kubernetes en `hit3/k8s/`) y en la observabilidad del **Hit #4** (`hit4/`):
+Los principios teóricos expuestos por Burns et al. guiaron de forma directa las decisiones de ingeniería implementadas en la infraestructura del **Hit #3** (manifiestos de Kubernetes en `hit3/k8s/`) y en la observabilidad del **Hit #4** (`hit4/`):
 
 ### 5.1 Estado vs. Efimeridad: StatefulSets frente a Deployments
 Siguiendo la premisa de que los sistemas de control deben modelar explícitamente los requerimientos de identidad y estado de las cargas de trabajo:
@@ -144,7 +144,7 @@ Siguiendo la premisa de que los sistemas de control deben modelar explícitament
 ### 5.2 Topología y Aislamiento de Recursos: *Node Selectors* y *Pools*
 En alineación con la segregación de cargas de trabajo que realizaba Borg entre servicios de infraestructura y aplicaciones de usuario, estructuramos el clúster en dos grupos lógicos de nodos:
 * **Infraestructura (`sobel/infra=true`):** Reservado para los componentes críticos y de soporte que requieren estabilidad y persistencia (RabbitMQ, Redis, Prometheus y Grafana).
-* **Aplicaciones (`sobel/apps=true`):** Asignado a los procesos de cómputo y transformación (Backend API, Splitter, Joiner, Reasignador y Workers de Sobel y Grises).
+* **Aplicaciones (`sobel/apps=true`):** Asignado a los procesos de cómputo y transformación (Backend API, Splitter, Joiner, Reasignador y Workers).
 
 Para evitar que el clúster k3s local mononodo colapsara por incompatibilidad de etiquetas (donde la asignación secuencial de una etiqueta común sobreescribe el valor anterior), implementamos una estrategia de **etiquetas booleanas independientes** (`sobel/infra: "true"` y `sobel/apps: "true"`), permitiendo que en entornos de desarrollo ambos roles convivan en un único nodo sin fricción, pero garantizando que en un despliegue multinodo o en Google Kubernetes Engine (GKE) los pods se aíslen físicamente en *node pools* especializados.
 
@@ -168,22 +168,25 @@ En el **Hit #4**, la recolección de métricas adopta la filosofía declarativa 
 Esta sección provee los elementos que se integran en el informe consolidado final a cargo de Tomás (rol T7):
 
 ### 6.1 Resumen del Stack de Observabilidad (Hit #4)
-* **Infraestructura:** Helm release de `kube-prometheus-stack` desplegado en el espacio de nombres `infra` con afinidad hacia `sobel/infra=true`.
-* **Dashboards:** Tablero de Grafana exportado con 19 paneles organizados en 4 filas temáticas:
-  1. *Infraestructura:* Consumo de CPU y Memoria por Pod y por Nodo.
-  2. *Pipeline de RabbitMQ:* Mensajes publicados vs. consumidos por segundo, y profundidad en cola (sobel.split, sobel.tareas.sobel, sobel.tareas.grises, sobel.joiner, sobel.dlq).
-  3. *Métricas de Negocio:* Tareas procesadas exitosamente por operación y tasa de errores.
-  4. *Rendimiento y SLOs:* Latencia de respuesta de la API Gateway (p50, p95, p99) y conteo dinámico de workers activos.
+* **Infraestructura:** Helm release de `kube-prometheus-stack` desplegado en el espacio de nombres `monitoring` con afinidad hacia `sobel/infra=true`.
+* **Dashboards:** Tablero de Grafana exportado con 14 paneles organizados en 5 filas temáticas:
+  1. *Visión general:* mensajes en colas, tasa de errores, workers activos y mensajes en `sobel.dlq.agotados`.
+  2. *Pipeline de RabbitMQ:* profundidad de cada cola (`sobel.split`, `sobel.tareas.<imagen>`, `sobel.joiner`, `sobel.dlq`) y mensajes publicados vs. consumidos por segundo.
+  3. *Tareas y errores:* tareas procesadas por operación (`sobel_tareas_procesadas_total`) y errores por servicio y tipo (`sobel_errores_total`).
+  4. *Latencias:* tiempo por tarea según la operación y tiempo total del job (p50, p95, p99).
+  5. *Recursos:* CPU y memoria por pod y por nodo.
 * **Reglas de Alerta Activas:**
-  * `SobelColaSaturada`: Dispara una alerta de severidad `warning` si `sobel_tareas_en_cola > 50` durante más de 1 minuto.
-  * `SobelWorkerInactivo`: Dispara una alerta de severidad `critical` si la cantidad de workers activos cae a 0 mientras existen tareas pendientes encoladas.
+  * `SobelColaSaturada` (`warning`): alguna cola `sobel.*` supera los 50 mensajes durante más de 1 minuto (`rabbitmq_queue_messages`, o `sobel_tareas_en_cola` del backend).
+  * `SobelWorkerCaido` (`critical`): el Deployment del worker se queda sin réplicas disponibles o su target de Prometheus no responde durante 30 s.
+  * `SobelDLQAgotadosPresentes`: hay fragmentos en `sobel.dlq.agotados` durante más de 1 minuto y requieren que un admin los reprocese.
+  * `SobelTasaErroresElevada`: más del 5 % de respuestas `5xx` del backend en 5 minutos, sostenido durante 2 minutos.
 
 ### 6.2 Resumen de Pruebas de Carga con k6 (Hit #3 / R5)
 * **Suite de pruebas:** Script modular `hit3/carga/matriz_r5.js` con soporte para matrices multidimensionales y validación de SLOs:
   * $V_A$ Archivos: 1, 10, 50.
-  * $V_B$ Operaciones: 1 (sobel), 2 (sobel + grises), 3 (grises + blur + sobel).
+  * $V_B$ Operaciones: 1 (sobel), 2 (grises → sobel), 3 (grises → blur → sobel).
   * $V_C$ Usuarios Concurrentes: 1, 10, 50 VUs con rampa de aceleración controlada.
-  * $V_1$ Tamaños de imagen calibrados: 1 KB, 1 MB, 10 MB y 50 MB (generados por `generar_datos.py`).
+  * $V_1$ Tamaños de imagen calibrados: 1 KB, 1 MB, 10 MB, 50 MB y 100 MB (generados por `generar_datos.py`).
   * $V_3$ Cantidad de réplicas de workers activos.
   * Token de autenticación Bearer dinámico para el tráfico legítimo y simulación de bot no autorizado sin token.
   * Inyección controlada de casos anómalos: operaciones inválidas (HTTP 422) y archivos binarios corruptos.
