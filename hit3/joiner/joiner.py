@@ -14,19 +14,30 @@ def ahora_en_ms():
     return int(time.time() * 1000)
 
 
+class FragmentoFaltante(Exception):
+    """El archivo tiene todos sus fragmentos en `listos` pero falta alguno del último paso: va a la DLQ."""
+
+
 def contar(redis, job_id, archivo, indice, ttl):
-    """Anota el fragmento en `listos` y suma 1 a `completos`, juntos y sólo si es nuevo (un duplicado no suma)."""
-    clave_listos = claves.listos(job_id, archivo)
+    """Anota el fragmento en `listos` y suma 1 a `completos`, juntos y sólo si es nuevo (un duplicado no suma).
+
+    Si el job venció no escribe nada y devuelve False: el HINCRBY de `completos` lo recrearía sin TTL. El WATCH
+    sobre el job hace que no pueda vencer entre el chequeo y la escritura.
+    """
+    clave_listos, clave_job = claves.listos(job_id, archivo), claves.job(job_id)
 
     def escribir(transaccion):
+        if not transaccion.exists(clave_job):
+            return False
         nuevo = not transaccion.sismember(clave_listos, indice)
         transaccion.multi()
         if nuevo:
             transaccion.sadd(clave_listos, indice)
-            transaccion.hincrby(claves.job(job_id), "completos", 1)
+            transaccion.hincrby(clave_job, "completos", 1)
         transaccion.expire(clave_listos, ttl)
+        return True
 
-    redis.transaction(escribir, clave_listos)
+    return redis.transaction(escribir, clave_listos, clave_job, value_from_callable=True)
 
 
 def unir_si_corresponde(redis, job_id, archivo, ttl, ahora_ms):
@@ -43,7 +54,14 @@ def unir_si_corresponde(redis, job_id, archivo, ttl, ahora_ms):
     pasos = len(json.loads(redis.hget(claves.job(job_id), "operaciones")))  # el último paso es el de la cadena entera
     fragmentos = [claves.fragmento(job_id, archivo, indice, pasos) for indice in range(len(geometria))]
     inicio = ahora_ms()
-    imagen = pixeles.unir([pixeles.leer(datos) for datos in redis.mget(fragmentos)], geometria)
+    pngs = redis.mget(fragmentos)
+    faltantes = [indice for indice, datos in enumerate(pngs) if datos is None]
+    if faltantes:
+        if redis.sismember(claves.unidos(job_id), archivo):
+            return None  # otra réplica lo unió y borró los fragmentos entre el chequeo de arriba y el MGET
+        raise FragmentoFaltante(f"job {job_id}: al archivo {archivo} le faltan los fragmentos {faltantes} "
+                                f"del paso {pasos}")
+    imagen = pixeles.unir([pixeles.leer(datos) for datos in pngs], geometria)
     redis.set(claves.resultado(job_id, archivo), pixeles.a_png(imagen), ex=ttl)
     t_join_ms = ahora_ms() - inicio
     with redis.pipeline() as transaccion:
@@ -51,7 +69,9 @@ def unir_si_corresponde(redis, job_id, archivo, ttl, ahora_ms):
         transaccion.sadd(claves.unidos(job_id), archivo)
         transaccion.expire(claves.unidos(job_id), ttl)
         transaccion.execute()
-    redis.delete(*fragmentos)  # recién ahora: ya está en `unidos`, nadie los vuelve a necesitar
+    # Recién ahora: ya está en `unidos`, nadie los vuelve a necesitar. Si el joiner se corta justo antes, la
+    # reentrega ve el archivo unido y no los borra: quedan hasta que vence el TTL, sin dañar el resultado.
+    redis.delete(*fragmentos)
     return len(geometria), t_join_ms
 
 
@@ -85,7 +105,11 @@ def manejador(redis, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=loggi
     def procesar(canal, cuerpo):
         mensaje = json.loads(cuerpo)
         job_id, archivo = mensaje["job_id"], mensaje["archivo"]
-        contar(redis, job_id, archivo, mensaje["fragmento"], ttl)
+        if not contar(redis, job_id, archivo, mensaje["fragmento"], ttl):
+            # Ni reintentarlo ni la DLQ lo arreglan: el job venció.
+            log.warning("job %s no existe, se descarta el fragmento %d del archivo %d", job_id, mensaje["fragmento"],
+                        archivo)
+            return
         unido = unir_si_corresponde(redis, job_id, archivo, ttl, ahora_ms)
         if unido:
             log.info("job %s: archivo %d unido (%d fragmentos) en %d ms", job_id, archivo, *unido)

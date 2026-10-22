@@ -157,6 +157,143 @@ def test_t_join_ms_suma_lo_que_tardo_cada_union(redis):
     assert redis.hget("job:j1", "t_join_ms") == b"70"
 
 
+def contado_entero(redis):
+    """Como queda si el joiner se cae después de contar el último fragmento: los 3 en `listos` y en `completos`."""
+    redis.sadd("job:j1:listos:0", 0, 1, 2)
+    redis.hset("job:j1", "completos", 3)
+
+
+def foto(redis):
+    """Cada clave con su valor serializado: para ver que algo no cambió nada."""
+    return {clave: redis.dump(clave) for clave in redis.keys()}
+
+
+def test_un_duplicado_no_suma_a_completos(redis):
+    preparar_archivo_terminado(redis)
+    procesar = manejador(redis)
+
+    procesar(Canal(), mensaje_resultado(fragmento=1))
+    procesar(Canal(), mensaje_resultado(fragmento=1))
+
+    assert redis.hget("job:j1", "completos") == b"1" and redis.smembers("job:j1:listos:0") == {b"1"}
+
+
+def test_la_reentrega_de_un_fragmento_ya_contado_une_el_archivo_que_quedo_sin_unir(redis):
+    imagen = preparar_archivo_terminado(redis)
+    contado_entero(redis)
+
+    manejador(redis)(Canal(), mensaje_resultado(fragmento=2))
+
+    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:0")), imagen)
+    assert redis.smembers("job:j1:unidos") == {b"0"} and redis.keys("job:j1:frag:*") == []
+    assert redis.hmget("job:j1", "estado", "completos") == [b"done", b"3"]
+
+
+def test_la_reentrega_con_el_resultado_escrito_pero_sin_marcar_vuelve_a_unir_y_lo_marca(redis):
+    imagen = preparar_archivo_terminado(redis)
+    contado_entero(redis)
+    redis.set("job:j1:resultado:0", b"de la pasada que se cayo")
+
+    manejador(redis)(Canal(), mensaje_resultado(fragmento=0))
+
+    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:0")), imagen)
+    assert redis.smembers("job:j1:unidos") == {b"0"} and redis.keys("job:j1:frag:*") == []
+    assert redis.hmget("job:j1", "t_join_ms", "estado") == [b"40", b"done"]
+
+
+def test_la_reentrega_con_todos_los_archivos_unidos_cierra_el_job_que_quedo_abierto(redis):
+    preparar_archivo_terminado(redis)
+    contado_entero(redis)
+    redis.set("job:j1:resultado:0", b"unido")
+    redis.sadd("job:j1:unidos", 0)
+    redis.delete(*redis.keys("job:j1:frag:*"))
+
+    manejador(redis, ahora_ms=reloj(1761055395050))(Canal(), mensaje_resultado(fragmento=1))
+
+    assert redis.hmget("job:j1", "estado", "terminado") == [b"done", b"1761055395050"]
+    assert redis.lrange("terminados", 0, -1) == [b"done 4050"]
+    assert redis.get("job:j1:resultado:0") == b"unido"
+
+
+def test_un_duplicado_despues_de_cerrar_el_job_no_cambia_nada(redis):
+    preparar_archivo_terminado(redis)
+    procesar = manejador(redis, ahora_ms=reloj(1761055395000, 1761055395040, 1761055395050, 1761055399000))
+    for f in range(3):
+        procesar(Canal(), mensaje_resultado(fragmento=f))
+    antes = foto(redis)
+
+    procesar(Canal(), mensaje_resultado(fragmento=1))
+
+    assert foto(redis) == antes
+    assert redis.lrange("terminados", 0, -1) == [b"done 4050"]
+
+
+def test_un_job_failed_no_se_cierra(redis):
+    preparar_archivo_terminado(redis)
+    redis.hset("job:j1", "estado", "failed")
+    procesar = manejador(redis)
+
+    for f in range(3):
+        procesar(Canal(), mensaje_resultado(fragmento=f))
+
+    assert redis.hmget("job:j1", "estado", "terminado") == [b"failed", None]
+    assert redis.lrange("terminados", 0, -1) == []
+
+
+def test_un_fragmento_de_un_job_vencido_se_descarta_con_un_aviso_y_sin_recrear_el_job(redis, caplog):
+    preparar_archivo(redis)  # quedaron la geometría y los fragmentos, pero job:j1 venció
+    antes = sorted(redis.keys())
+
+    manejador(redis)(Canal(), mensaje_resultado(fragmento=0))
+
+    assert sorted(redis.keys()) == antes
+    assert [r.levelname for r in caplog.records] == ["WARNING"] and "j1" in caplog.text
+
+
+def test_un_archivo_completo_al_que_le_falta_un_fragmento_del_ultimo_paso_falla_sin_escribir_nada(redis):
+    preparar_archivo_terminado(redis)
+    redis.delete("job:j1:frag:0:1:1")  # no debería pasar: el worker lo publicó como completo
+    procesar = manejador(redis)
+    procesar(Canal(), mensaje_resultado(fragmento=0))
+    procesar(Canal(), mensaje_resultado(fragmento=1))
+
+    with pytest.raises(joiner.FragmentoFaltante, match=r"fragmentos \[1\]"):  # consumir hace nack: va a la DLQ
+        procesar(Canal(), mensaje_resultado(fragmento=2))
+
+    assert not redis.exists("job:j1:resultado:0", "job:j1:unidos")
+    assert redis.hget("job:j1", "t_join_ms") is None and redis.hget("job:j1", "estado") == b"processing"
+    assert sorted(redis.keys("job:j1:frag:*")) == [b"job:j1:frag:0:0:1", b"job:j1:frag:0:2:1"]
+
+
+class OtraReplicaUneEnElMedio:
+    """El Redis de verdad, salvo que justo antes de leer los fragmentos otra réplica une el archivo 0: escribe el
+    resultado, lo marca en `unidos` y borra los fragmentos del último paso."""
+
+    def __init__(self, redis):
+        self.redis = redis
+
+    def __getattr__(self, nombre):
+        return getattr(self.redis, nombre)
+
+    def mget(self, claves):
+        self.redis.set("job:j1:resultado:0", b"de la otra replica")
+        self.redis.sadd("job:j1:unidos", 0)
+        self.redis.delete(*claves)
+        return self.redis.mget(claves)
+
+
+def test_si_otra_replica_une_el_archivo_mientras_lo_lee_vuelve_sin_error_y_sin_pisarla(redis):
+    preparar_archivo_terminado(redis)
+    procesar = manejador(redis)
+    procesar(Canal(), mensaje_resultado(fragmento=0))
+    procesar(Canal(), mensaje_resultado(fragmento=1))
+
+    manejador(OtraReplicaUneEnElMedio(redis))(Canal(), mensaje_resultado(fragmento=2))
+
+    assert redis.get("job:j1:resultado:0") == b"de la otra replica"
+    assert redis.hget("job:j1", "t_join_ms") is None
+
+
 # Encadenado con el split y el worker (seams S4 + S6 + S9): el job entra como lo deja el backend y sale en done.
 
 class CanalQuePublica:
