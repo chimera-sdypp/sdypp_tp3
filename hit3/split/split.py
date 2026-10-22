@@ -7,7 +7,7 @@ import signal
 import sys
 import time
 
-from comun import colas, conexion, pixeles, registro, salud
+from comun import claves, colas, conexion, pixeles, registro, salud
 
 
 # Suman una fila de borde por lado (contrato §10). Supone kernels 3×3: el de `blur` se fija en M3 y se
@@ -22,16 +22,17 @@ def ahora_en_ms():
     return int(time.time() * 1000)
 
 
-def fallar_por_archivo_invalido(redis, job, archivos, mensaje, ahora):
+def fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora):
     """Deja el job en `failed` con error ARCHIVO_INVALIDO y `terminado`, lo anota en `terminados` (los últimos 1000)
     y borra las entradas. Todo junto: si se cortara en el medio, el redelivery vería `failed` y no completaría el resto."""
+    job = claves.job(job_id)
     error = {"tipo": "ARCHIVO_INVALIDO", "mensaje": mensaje}
     total_ms = ahora - int(redis.hget(job, "creado"))
     with redis.pipeline() as transaccion:
         transaccion.hset(job, mapping={"estado": "failed", "error": json.dumps(error), "terminado": ahora})
-        transaccion.lpush("terminados", f"failed {total_ms}")
-        transaccion.ltrim("terminados", 0, 999)
-        transaccion.delete(*(f"{job}:entrada:{archivo}" for archivo in range(archivos)))
+        transaccion.lpush(claves.TERMINADOS, f"failed {total_ms}")
+        transaccion.ltrim(claves.TERMINADOS, 0, 999)
+        transaccion.delete(*(claves.entrada(job_id, archivo) for archivo in range(archivos)))
         transaccion.execute()
 
 
@@ -57,7 +58,7 @@ def manejador(redis, partes, ttl=TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logg
     def procesar(canal, cuerpo):
         inicio = ahora_ms()
         job_id = json.loads(cuerpo)["job_id"]
-        job = f"job:{job_id}"
+        job = claves.job(job_id)
         estado = redis.hget(job, "estado")
         if estado is None:
             # Ni reintentarlo ni la DLQ lo arreglan: sobel.split no tiene DLX y el reasignador maneja tareas.
@@ -73,23 +74,23 @@ def manejador(redis, partes, ttl=TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logg
         archivos = int(redis.hget(job, "archivos"))
         for archivo in range(archivos):
             try:
-                matriz = pixeles.leer_rgb(redis.get(f"{job}:entrada:{archivo}"))
+                matriz = pixeles.leer_rgb(redis.get(claves.entrada(job_id, archivo)))
             except ValueError:
                 # Lo ya escrito vence por TTL; no se publica nada, así `failed` queda final (contrato §3).
                 mensaje = f"el archivo {archivo} no se pudo decodificar"
-                fallar_por_archivo_invalido(redis, job, archivos, mensaje, ahora_ms())
+                fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora_ms())
                 log.warning("job %s: %s, queda en failed", job_id, mensaje)
                 return
             fragmentos = pixeles.dividir(matriz, partes, filas_de_borde)
             geometria = {"total": len(fragmentos)}
             for f, (franja, extra, filas) in enumerate(fragmentos):
-                redis.set(f"{job}:frag:{archivo}:{f}:0", pixeles.a_png(franja), ex=ttl)
+                redis.set(claves.fragmento(job_id, archivo, f, 0), pixeles.a_png(franja), ex=ttl)
                 geometria[f] = f"{extra},{filas}"
                 tareas.append({"job_id": job_id, "archivo": archivo, "fragmento": f, "paso": 0,
                                "operaciones": operaciones, "intento": 1})
             with redis.pipeline() as transaccion:  # sin TTL quedaría para siempre si se corta entre los dos
-                transaccion.hset(f"{job}:geometria:{archivo}", mapping=geometria)
-                transaccion.expire(f"{job}:geometria:{archivo}", ttl)
+                transaccion.hset(claves.geometria(job_id, archivo), mapping=geometria)
+                transaccion.expire(claves.geometria(job_id, archivo), ttl)
                 transaccion.execute()
 
         redis.hset(job, "fragmentos_total", len(tareas))
@@ -99,7 +100,7 @@ def manejador(redis, partes, ttl=TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logg
         t_split_ms = ahora_ms() - inicio
         pasar_a_processing(redis, job, t_split_ms)
         # Recién ahora: fuera de queued, un redelivery ya no las necesita (contrato §10: las borra el split).
-        redis.delete(*(f"{job}:entrada:{archivo}" for archivo in range(archivos)))
+        redis.delete(*(claves.entrada(job_id, archivo) for archivo in range(archivos)))
         log.info("job %s: %d fragmentos a %s en %d ms", job_id, len(tareas), cola, t_split_ms)
 
     return procesar
