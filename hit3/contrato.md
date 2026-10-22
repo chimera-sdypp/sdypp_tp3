@@ -101,9 +101,9 @@ Respuesta inmediata, `202` con `Location: /jobs/<id>`. Todas las respuestas usan
 | `tiempos_s.join` | La suma de lo que tardó el joiner en unir cada archivo (`null` hasta que une el primero) |
 | `tiempos_s.total` | De `creado` a `terminado` |
 | `workers` | Los workers que procesaron al menos un fragmento |
-| `reintentos` | Cuántas veces el reasignador volvió a encolar un fragmento sacado de la DLQ |
+| `reintentos` | Cuántas veces el reasignador volvió a encolar una tarea sacada de la DLQ |
 | `resultados` | Con `done`, una URL por archivo, en el orden en que se mandaron: `/jobs/{id}/resultado/0`, … |
-| `error` | Con `failed` o `dlq`: `{"tipo", "mensaje"}` |
+| `error` | Con `failed` o `dlq`: `{"tipo", "mensaje"}`. `tipo` es `ARCHIVO_INVALIDO` (el split no pudo decodificar un archivo), `REINTENTOS_AGOTADOS` (una tarea agotó los reintentos; el mensaje nombra su operación, el fragmento y el archivo) o `ERROR_INTERNO` (falló el split o el joiner) |
 
 | Estado | Significa | Lo pone |
 |---|---|---|
@@ -111,9 +111,12 @@ Respuesta inmediata, `202` con `Location: /jobs/<id>`. Todas las respuestas usan
 | `processing` | Partido; los fragmentos están en los workers | split (o el backend al reprocesar la DLQ) |
 | `done` | Todos los archivos unidos; los resultados se pueden bajar | joiner |
 | `failed` | Error que no se arregla reintentando: un archivo que pasó la validación pero no se puede decodificar, o un job del split o un fragmento completo del joiner que llegó a la DLQ (§9) | split, reasignador |
-| `dlq` | Al menos un fragmento agotó los reintentos. Un admin lo puede reprocesar y vuelve a `processing` | reasignador |
+| `dlq` | Al menos una tarea agotó los reintentos. Un admin lo puede reprocesar y vuelve a `processing` | reasignador |
 
-`done` y `failed` son finales: nadie los cambia después.
+`done` y `failed` son finales: nadie los cambia después. `dlq` no lo es: vuelve a `processing` cuando un admin lo
+reprocesa, o pasa a `failed` si después llega a la DLQ un job del split o un fragmento completo del joiner (y a `done`
+en un caso raro: si otra copia de la tarea agotada, de una reentrega, terminó bien). Un job reprocesado aparece en
+`terminados` (§10) una vez por cada terminación: `dlq` y después `done`, `failed` u otra vez `dlq`.
 
 **Otras rutas del usuario**
 
@@ -138,8 +141,9 @@ Respuesta inmediata, `202` con `Location: /jobs/<id>`. Todas las respuestas usan
 - `jobs` cuenta los jobs vigentes (Redis los guarda 24 h).
 - `colas` y `dlq` son los mensajes que hay ahora en cada cola. `fallidos` es `sobel.dlq` (el reasignador los
   está por reintentar); `agotados` es `sobel.dlq.agotados`.
-- `latencia_s` es el `tiempos_s.total` de los últimos 1000 jobs terminados.
-- `tasa_error` es la proporción de `failed` + `dlq` entre esos mismos jobs.
+- `latencia_s` es el `tiempos_s.total` de las últimas 1000 terminaciones de jobs (§10, `terminados`: un job
+  reprocesado cuenta una vez por cada terminación).
+- `tasa_error` es la proporción de `failed` + `dlq` entre esas mismas terminaciones.
 
 **`POST /admin/dlq/reprocesar`** vuelve a encolar todo lo que está en `sobel.dlq.agotados`, con `intento` en 1, y
 pasa esos jobs a `processing`: `{"reprocesados": 3, "jobs": ["3f6c2a9e-…"]}`.
@@ -199,7 +203,7 @@ Datos que **no** devolvemos y podríamos devolver:
 |---|---|
 | Costo estimado del job | Exige cruzar el tiempo de cada worker con el precio de su máquina y la parte del cluster que usó. El precio depende de la nube y de la región, y se conoce recién en la factura |
 | Nodo, zona y región de cada worker | Devolvemos el nombre del worker. Agregarle la ubicación obliga a cada worker a consultar el metadata server de la nube, distinto en cada proveedor y vacío en k3s |
-| Qué fragmentos se reasignaron desde la DLQ, y desde qué worker | Devolvemos la cantidad (`reintentos`). El detalle crece con fragmentos × intentos y está en los logs del reasignador |
+| Qué tareas se reasignaron desde la DLQ, y qué worker falló | Devolvemos la cantidad (`reintentos`). El detalle crece con fragmentos × intentos: el reasignador loguea el archivo, el fragmento, el paso, el intento y el motivo (`rejected` o `delivery_limit`). Qué worker falló no viaja en el mensaje que llega a la DLQ: si hizo `nack` por un error, está en su propio log; si murió, no se sabe |
 | Tiempos de cada fragmento y de cada paso | Devolvemos promedios. Con 50 archivos × 3 pasos la respuesta tendría cientos de entradas; el detalle está en Prometheus |
 | Historial de estados con la hora de cada cambio | Sólo guardamos `creado` y `terminado`. Las etapas intermedias se ven en `tiempos_s` |
 | Posición en la cola y tiempo estimado de fin | Cambian todo el tiempo y dependen de cuántos workers haya en ese momento. Con `fragmentos.porcentaje` y `tiempos_s.cola` el cliente puede estimarlo |
@@ -239,8 +243,8 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 - `<imagen>` es la referencia completa de la imagen (`sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0`).
 - Todos declaran con `hit3/comun/colas.py` y el mismo `SOBEL_LIMITE_ENTREGAS`: si una cola ya existe con otros
   argumentos, RabbitMQ responde `PRECONDITION_FAILED`, y para cambiarlos hay que borrarla. RabbitMQ cuenta
-  *reentregas* de un consumidor que se cae con el mensaje en la mano: con 3, a la 4.ª caída el mensaje va a la DLQ.
-  Un `nack` que lo reencola (cuando se cae Redis) no suma.
+  *reentregas* de un consumidor que se cae con el mensaje en la mano: con 3, a la 4.ª caída el mensaje va a la DLQ;
+  con 0, a la primera (lo usa la prueba de humo). Un `nack` que lo reencola (cuando se cae Redis) no suma.
 - Quien publica a una `sobel.tareas.<imagen>` la declara antes. La declaración es idempotente y evita que un mensaje
   se pierda si todavía no arrancó ningún worker de esa imagen.
 - Mensajes JSON (`content_type: application/json`) y persistentes (`delivery_mode: 2`). Los píxeles **no viajan
@@ -248,8 +252,12 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 - **A la DLQ** llega un mensaje cuando su consumidor hace `nack` sin reencolar (error al procesarlo, timeout del
   worker) o cuando muere con el mensaje en la mano más veces que `x-delivery-limit` (crash, OOM). Puede ser una
   tarea, un job del split o un fragmento completo del joiner. El reasignador los distingue por el header
-  `x-first-death-queue`: una tarea (de una `sobel.tareas.<imagen>`) la reintenta; un job o un fragmento completo no
-  tiene reintento que lo arregle, así que el reasignador pasa el job a `failed` (§10) y lo saca de la DLQ.
+  `x-first-death-queue`: una tarea (de una `sobel.tareas.<imagen>`) la vuelve a encolar enseguida, sin espera, en la
+  cola de la imagen de su paso, con `intento` + 1 y `encolado` nuevo; cuando agota `SOBEL_REINTENTOS_MAX`
+  reintentos, la manda tal cual a `sobel.dlq.agotados` y el job pasa a `dlq`. Un job o un fragmento completo no
+  tiene reintento que lo arregle, así que el reasignador pasa el job a `failed` (§10) y lo saca de la DLQ. La tarea
+  de un job en `done` o `failed` se descarta, sin reintentarla ni mandarla a agotados; la de un job en `dlq`, se
+  reintenta.
 
 **`sobel.split`**: `{"job_id": "3f6c2a9e-…"}`. El resto lo lee de `job:<id>`.
 
@@ -316,7 +324,7 @@ escriben a mano.
 | `job:<id>:unidos` | set | joiner | Archivos ya unidos |
 | `job:<id>:resultado:<a>` | string | joiner → backend | La imagen final en PNG |
 | `jobs`, `jobs:<usuario>` | zset | backend | `job_id` con la hora de creación como puntaje |
-| `terminados` | list | joiner, split, reasignador → backend | `"<estado> <ms totales>"` de los últimos 1000 jobs terminados (`LPUSH` + `LTRIM`), para `/stats` |
+| `terminados` | list | joiner, split, reasignador → backend | `"<estado> <ms totales>"` de las últimas 1000 terminaciones de jobs (`LPUSH` + `LTRIM`), para `/stats`. Un job reprocesado (§3) puede tener más de una |
 | `worker:<id>` | hash, vence a los 15 s | worker → backend, frontend | `<id>` es el hostname (pod o VM). `imagen`, `operaciones` (separadas por coma), `host`. El worker lo renueva cada 5 s |
 | `limite:<usuario>:<minuto>` | string, vence a los 60 s | backend | Contador del límite de pedidos |
 
@@ -330,10 +338,16 @@ escriben a mano.
 - **joiner:** `completos`, `t_join_ms` (la suma de lo que tardó cada unión), `listos`, `unidos` y los resultados, y
   al final `estado=done`, `terminado` y la entrada en `terminados`. Borra los fragmentos del último paso después de
   unir.
-- **reasignador:** `reintentos`. Cuando un fragmento agota los intentos: `en_dlq`, `estado=dlq`, `error`, `terminado` y la entrada en `terminados`.
-  Cuando le llega a la DLQ un job del split o un fragmento completo del joiner (§9), sin reintentar y si el job no
-  está ya en `done` ni en `failed` (§3): `estado=failed`, `error`, `terminado` y la entrada en `terminados`. No usa
-  `dlq` porque `/admin/dlq/reprocesar` sólo sabe reencolar tareas.
+- **reasignador:** `reintentos`. Por cada tarea que manda a `sobel.dlq.agotados`, suma 1 a `en_dlq` (el backend lo
+  resta al reprocesar), y la primera vez pasa el job a `dlq` con `error`, `terminado` y la entrada en `terminados`;
+  las siguientes sólo suman. Si otro servicio terminó el job justo antes (`done` o `failed`), suma igual y no cambia
+  el estado. Cuando
+  le llega a la DLQ un job del split o un fragmento completo del joiner (§9), sin reintentar y si el job no está ya
+  en `done` ni en `failed` (§3): `estado=failed`, `error`, `terminado` y la entrada en `terminados`, también desde
+  `dlq`. No usa `dlq` porque `/admin/dlq/reprocesar` sólo sabe reencolar tareas. Todo en una transacción con
+  `WATCH` sobre el job que no lo recrea si venció. Publica antes de escribir en Redis: si se cae en el medio, queda
+  una tarea duplicada (el worker la soporta) o un contador de más; si la caída es entre publicar en
+  `sobel.dlq.agotados` y la transacción, `en_dlq` queda una por debajo de lo que hay en esa cola.
 
 **Bordes.** Sobel y blur necesitan los vecinos de cada píxel. El split le agrega a cada fragmento tantas filas extra
 arriba y abajo como operaciones de vecindad tenga la cadena (`sobel` y `blur` cuentan; `grises` no). Las dos son 3×3:
@@ -410,4 +424,4 @@ conexión está caída. Las conexiones a RabbitMQ y Redis se reintentan con back
 | `SOBEL_IMAGEN` | worker | — | La referencia de su propia imagen; tiene que coincidir con la de `SOBEL_IMAGENES_PERMITIDAS` |
 | `SOBEL_OPERACIONES` | worker | `sobel,grises,blur` | Las operaciones que ofrece |
 | `SOBEL_TIMEOUT` | worker | `60` | Segundos máximos de la operación sobre un fragmento (no cuenta leer ni escribir el PNG); pasado ese tiempo, `nack` a la DLQ |
-| `SOBEL_REINTENTOS_MAX` | reasignador | `3` | Intentos antes de mandar el fragmento a `sobel.dlq.agotados` |
+| `SOBEL_REINTENTOS_MAX` | reasignador | `3` | Reintentos de una tarea antes de mandarla a `sobel.dlq.agotados`: con 3, la tarea tiene hasta 4 intentos (cada uno, con sus reentregas por `SOBEL_LIMITE_ENTREGAS`) |
