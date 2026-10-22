@@ -5,8 +5,8 @@
 # ==============================================================================
 # Propósito del script:
 # Este script ejecuta secuencialmente los tests unitarios de los 4 ejercicios del
-# Hit #0 (ex1: colas básicas, ex2: workers concurrentes, ex3: pub/sub con fanout,
-# ex4: direct exchange y enrutamiento con routing keys).
+# Hit #0 (ex1: message queue punto a punto, ex2: pub/sub fanout, ex3: DLQ,
+# ex4: retry con backoff exponencial).
 #
 # Aspecto arquitectónico crítico (Problema de colisión en sys.modules):
 # En pytest y el motor de importación de Python, cuando se ejecutan tests en un
@@ -70,7 +70,7 @@ done
 
 # Veredicto consolidado de la batería de pruebas de Hit #0
 if [ "$fallas" -eq 0 ]; then
-  echo "🎉 Todos los tests del Hit #0 pasaron exitosamente (30/30 tests OK)."
+  echo "🎉 Todos los tests del Hit #0 pasaron exitosamente."
 else
   echo "❌ Fallaron $fallas suites de prueba en Hit #0."
   exit 1

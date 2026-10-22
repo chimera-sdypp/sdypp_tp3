@@ -44,7 +44,7 @@ flowchart LR
     P["PRODUCER"] -->|basic_publish| Q[("Cola Principal<br/>x-dead-letter-exchange=dlx")]
     Q --> C["CONSUMER"]
     C -->|éxito| ACK((basic_ack))
-    C -.->|fallo irrecuperable<br/>basic_nack(requeue=False)| Q
+    C -.->|"fallo irrecuperable<br/>basic_nack(requeue=False)"| Q
     Q -.->|enrutamiento por broker| DLX{"DLX EXCHANGE"}
     DLX --> DLQ[("DEAD LETTER QUEUE")]
     DLQ --> AUDIT["DLQ CONSUMER / ALERTA"]
@@ -54,18 +54,20 @@ flowchart LR
 
 ### 1.4 Patrón 4: Retry con Exponential Backoff (Retardo Exponencial sin Bloqueo)
 * **Objetivo:** Reintentar el procesamiento de mensajes ante fallos transitorios (ej. saturación temporal de base de datos o timeout de red), espaciando los reintentos exponencialmente ($t = 2^k \cdot t_0$) sin congelar el hilo del consumidor (`sleep`).
-* **Mecánica:** Se utilizan colas intermedias de espera configuradas con `x-message-ttl` (tiempo de vida del mensaje) y un `x-dead-letter-exchange` que apunta de regreso a la cola de procesamiento. El consumidor incrementa un contador en las cabeceras (`x-retry-count`) y publica el mensaje en la cola con el delay correspondiente; al vencer el TTL, RabbitMQ lo devuelve a la cola principal. Si supera `MAX_RETRIES`, se envía a la DLQ definitiva.
+* **Mecánica:** Se utilizan colas intermedias de espera (una por nivel: 1, 2, 4 y 8 s) configuradas con `x-message-ttl` y un dead-letter al exchange por defecto con la cola principal como routing key, que devuelve el mensaje a la cola de procesamiento. El consumidor incrementa un contador en las cabeceras (`x-retry-count`) y publica el mensaje en la cola con el delay correspondiente; al vencer el TTL, RabbitMQ lo devuelve a la cola principal. Si falla después de `MAX_RETRIES` (4) reintentos, hace `basic_nack(requeue=False)` y la cola principal lo deriva a la DLQ.
 
 ```mermaid
 flowchart LR
     Q[("Cola Principal")] --> C["CONSUMER"]
-    C -->|Fallo transitorio<br/>reintento 1 (1s)| W1[("wait.1s<br/>TTL=1000ms")]
-    C -->|Fallo transitorio<br/>reintento 2 (2s)| W2[("wait.2s<br/>TTL=2000ms")]
-    C -->|Fallo transitorio<br/>reintento 3 (4s)| W4[("wait.4s<br/>TTL=4000ms")]
-    W1 -.->|TTL vencido| RET_EX{"retry_exchange"} --> Q
+    C -->|"reintento 1 (1s)"| W1[("wait.1s<br/>TTL=1000ms")]
+    C -->|"reintento 2 (2s)"| W2[("wait.2s<br/>TTL=2000ms")]
+    C -->|"reintento 3 (4s)"| W4[("wait.4s<br/>TTL=4000ms")]
+    C -->|"reintento 4 (8s)"| W8[("wait.8s<br/>TTL=8000ms")]
+    W1 -.->|TTL vencido| RET_EX{"default exchange<br/>routing key = cola principal"} --> Q
     W2 -.->|TTL vencido| RET_EX
     W4 -.->|TTL vencido| RET_EX
-    C -->|Tope alcanzado| DLQ[("DLQ Final")]
+    W8 -.->|TTL vencido| RET_EX
+    C -->|"falla tras 4 reintentos<br/>basic_nack(requeue=False)"| DLQ[("DLQ")]
 ```
 
 ---
@@ -113,31 +115,31 @@ En el sistema distribuido completo del TP (**Hit #3**), ninguno de estos patrone
 
 ```mermaid
 flowchart TD
-    subgraph Ingesta y Split
+    subgraph ingesta ["Ingesta y Split"]
         B[Backend API] -->|"1. P2P: sobel.split"| S[Servicio Split]
     end
 
-    subgraph Procesamiento Distribuido (Work Queues)
-        S -->|"1. P2P: sobel.tareas.<op>"| W[Workers Sobel / Grises]
+    subgraph proceso ["Procesamiento Distribuido (Work Queues)"]
+        S -->|"1. P2P: sobel.tareas.#lt;imagen#gt;"| W["Workers (sobel, grises, blur)"]
         W -->|"P2P: siguiente paso"| W
     end
 
-    subgraph Resiliencia y Fallos
+    subgraph resiliencia ["Resiliencia y Fallos"]
         W -.->|"3. DLQ: fallo o crash"| DLX[sobel.dlx]
         DLX --> DLQ[(sobel.dlq)]
         DLQ --> R[Reasignador]
-        R -->|"4. Backoff / Reintento"| W
+        R -->|"Reintento (intento + 1)"| W
         R -.->|"Agotado"| DLQ_FINAL[(sobel.dlq.agotados)]
     end
 
-    subgraph Finalización y Notificación
+    subgraph final ["Finalización y Notificación"]
         W -->|"2. Fan-out: sobel.resultados"| FANOUT{{Exchange Fanout}}
         FANOUT -->|Copia| J[Servicio Joiner]
         FANOUT -->|Copia| D[Frontend / Dashboard]
     end
 ```
 
-1. **Patrón 1 (P2P / Work Queue):** Utilizado en `sobel.split` y `sobel.tareas.<op>` para repartir equitativamente los fragmentos de imágenes entre los pods de workers activos en Kubernetes.
+1. **Patrón 1 (P2P / Work Queue):** Utilizado en `sobel.split` y `sobel.tareas.<imagen>` (una cola por imagen de worker) para repartir equitativamente los fragmentos de imágenes entre los pods de workers activos en Kubernetes.
 2. **Patrón 2 (Pub-Sub / Fan-out):** Utilizado en el exchange `sobel.resultados`. Cuando un worker finaliza el último paso de un fragmento, emite al fanout; de este modo, tanto el **Joiner** (que ensambla la imagen) como el **Frontend** (que actualiza la barra de progreso en vivo) reciben su propia copia del evento sin acoplarse entre sí.
 3. **Patrón 3 (DLQ):** Colas quorum con `x-dead-letter-exchange: sobel.dlx` y límite de entregas (`x-delivery-limit`). Si un worker crashea procesando un fragmento, el broker no pierde el mensaje sino que lo desvía a `sobel.dlq`.
-4. **Patrón 4 (Backoff):** Implementado en `hit3/comun/conexion.py` para la conexión resiliente a RabbitMQ y Redis, y en el reasignador que evalúa los fragmentos de la DLQ antes de volver a inyectarlos al flujo de trabajo.
+4. **Patrón 4 (Backoff):** Implementado en `hit3/comun/conexion.py` para la conexión resiliente a RabbitMQ y Redis (1, 2, 4, 8… s con tope de 30 s). Los fragmentos fallidos los vuelve a encolar el reasignador desde `sobel.dlq`, sumando `intento`, hasta agotar `SOBEL_REINTENTOS_MAX`.
