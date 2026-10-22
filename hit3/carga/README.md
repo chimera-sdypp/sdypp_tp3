@@ -13,8 +13,8 @@ Las pruebas exploran el espacio de estados cruzando cinco dimensiones clave:
 | **$VA$** | Cantidad de archivos por job | `1`, `10`, `50` archivos |
 | **$VB$** | Cantidad de operaciones encadenadas | `1` (`sobel`), `2` (`grises` → `sobel`), `3` (`grises` → `blur` → `sobel`) |
 | **$VC$** | Usuarios virtuales concurrentes (VUs) | `1`, `10`, `50` usuarios con token JWT individual y bots sin token |
-| **$V1$** | Tamaño de las imágenes | `1kb`, `1mb`, `10mb`, `50mb` |
-| **$V3$** | Cantidad de workers activos | Parámetro del cluster (ej: `2`, `4`, `8` réplicas en pods o VMs) |
+| **$V1$** | Tamaño de las imágenes | `1kb`, `1mb`, `10mb`, `50mb`, `100mb` |
+| **$V3$** | Cantidad de workers activos | `--completa` escala el Deployment a cada valor de `V3_VALORES` (por defecto `2` y `4`) |
 
 ---
 
@@ -44,8 +44,7 @@ La suite no solo evalúa peticiones felices, sino que introduce un porcentaje co
 * **Bots sin autenticación (`401 NO_AUTORIZADO`):** Peticiones sin cabecera `Authorization` o con tokens vencidos. Deben ser rechazadas en el borde sin tocar RabbitMQ ni Redis.
 * **Operaciones no soportadas (`422 OPERACION_NO_SOPORTADA`):** Peticiones solicitando operaciones inexistentes (ej: `rotar`). Se validan antes de encolar.
 * **Archivos corruptos (`422 ARCHIVO_INVALIDO`):** Archivos con extensión válida pero bytes truncados o sin cabecera de imagen. Se detectan en la validación inicial.
-* **Límite de tasa (`429 DEMASIADOS_PEDIDOS`):** Cuando un mismo usuario supera los 120 pedidos por minuto, el backend responde `429` con cabecera `Retry-After`.
-* **Caída de worker (Tolerancia a fallos):** Al matar un worker durante una corrida masiva, los mensajes deben reencolarse vía RabbitMQ DLX hacia la cola `sobel.dlq`, ser reasignados y permitir que el job termine exitosamente.
+* **Caída de worker (Tolerancia a fallos):** La última celda de `--matriz` borra un pod del worker a los 15 s de carga; los mensajes deben reencolarse vía RabbitMQ DLX hacia la cola `sobel.dlq`, ser reasignados y permitir que el job termine exitosamente.
 
 ---
 
@@ -59,7 +58,7 @@ hit3/carga/
 ├── smoke_test.js        # Test de humo para validación rápida del contrato
 ├── README.md            # Documentación de uso y análisis
 ├── datos/               # Imágenes sintéticas y tokens (ignorado en git)
-└── resultados/          # Informes en JSON y Markdown (ignorado en git)
+└── resultados/<fecha>/  # JSON de cada celda e informe.md de la corrida (ignorado en git)
 ```
 
 ---
@@ -67,41 +66,31 @@ hit3/carga/
 ## 5. Instrucciones de Uso
 
 ### Requisitos Previos
-* **Python 3:** Con `pillow` y `numpy` para generar las imágenes sintéticas (`pip install pillow numpy`).
-* **k6 o Docker:** El script detecta automáticamente si `k6` está instalado en el sistema operativo; de lo contrario, utiliza la imagen oficial `grafana/k6:latest` mediante Docker de forma transparente.
+* **Python 3** con `pillow` y `numpy` (`pip install pillow numpy`) para generar los datos.
+* **`SOBEL_SECRETO`** exportado, o el `.env.secrets` que deja `hit3/k8s/crear_secretos.sh`: firma los tokens. Sin él,
+  `generar_datos.py` corta (con un secreto inventado todo daría 401).
+* **k6 o Docker:** si no hay `k6` instalado, usa la imagen `grafana/k6:1.8.1`.
+* **`kubectl`** para `--completa` (escala el worker) y para la celda con un worker que muere.
 
-### A. Test de Humo Rápido
-Verifica la conectividad, las respuestas de error y el ciclo de un job simple:
+### Modos
 ```bash
-./correr_matriz.sh --smoke
+./correr_matriz.sh --smoke                 # contrato: 401, 422, 202 y un job hasta done
+./correr_matriz.sh --celda 10 2 10 1mb     # una celda: VA VB VC V1, con los workers que haya
+./correr_matriz.sh --matriz                # 8 celdas representativas; la última mata un worker a mitad de la carga
+./correr_matriz.sh --completa              # VA × VB × VC × V1_VALORES para cada V3_VALORES (larga: más de 1 h)
+./correr_matriz.sh --v1                    # barrido de tamaño 1 KB → 100 MB con VA=1, VB=1, VC=1
 ```
 
-### B. Ejecutar una Celda Específica
-Permite probar una combinación puntual definiendo $VA$, $VB$, $VC$ y $V1$:
-```bash
-# Ejemplo: 10 archivos, 2 operaciones (grises -> sobel), 10 usuarios virtuales, imágenes de 1 MB
-./correr_matriz.sh --celda 10 2 10 1mb
+Cada corrida deja sus JSON y un `informe.md` con los tres SLOs en `resultados/<fecha>/`. V3 es la cantidad de
+réplicas listas del Deployment `sobel-worker` al empezar cada celda. Las celdas cuyo pedido pasa de 200 MiB
+(por ejemplo, 50 archivos de 10 MB) se saltean: el contrato las rechaza con `413`.
 
-# Ejemplo: 1 archivo grande de 10 MB con 1 usuario
-./correr_matriz.sh --celda 1 1 1 10mb
-```
-
-### C. Ejecutar la Corrida Representativa de la Matriz R5
-Ejecuta secuencialmente las celdas de prueba y genera un informe Markdown consolidado:
-```bash
-./correr_matriz.sh --matriz
-```
-
-### Variables de Entorno de Configuración
-Puedes sobreescribir los destinos y parámetros al ejecutar:
-```bash
-TARGET_URL="http://sobel.local" V3=4 DURATION="45s" ./correr_matriz.sh --matriz
-```
-
-* `TARGET_URL`: Dirección base del backend (por defecto `http://localhost:8080`).
-* `V3`: Cantidad de workers activos para documentar en los metadatos (por defecto `2`).
-* `DURATION`: Tiempo de carga sostenida por celda (por defecto `30s`).
-* `RAMP_UP`: Tiempo de incremento de carga (por defecto `5s`).
+### Variables de Entorno
+* `TARGET_URL`: URL del ingress (por defecto `http://localhost`).
+* `DURATION` / `RAMP_UP`: meseta y rampa de cada celda (por defecto `30s` y `5s`); la bajada es de `5s`.
+* `V3_VALORES` / `V1_VALORES`: valores de `--completa` (por defecto `"2 4"` y `"1mb 10mb"`).
+* `SOBEL_NAMESPACE` / `SOBEL_DEPLOY_WORKER`: dónde está el worker (por defecto `sobel` y `sobel-worker`).
+* `MAX_POLL_TIMEOUT_S`: espera máxima de un job; por defecto, el umbral del SLO 2 más 30 s.
 
 ---
 
@@ -111,5 +100,5 @@ Mientras k6 ejecuta las pruebas, es fundamental observar en vivo el dashboard de
 
 1. **Throughput de mensajes:** Observar la correlación entre peticiones en k6 y la tasa de mensajes por segundo en RabbitMQ.
 2. **Cola saturada:** En celdas con $VC=50$ o $VA=50$, verificar cómo la cola `sobel.tareas.*` acumula mensajes y dispara la alerta `SobelColaSaturada` cuando supera los 50 fragmentos.
-3. **Consumo de recursos:** Validar que los pods de workers escalen su consumo de CPU hacia el límite fijado en los manifiestos (`500m`).
-4. **DLQ y reintentos:** En caso de fallas simuladas (ej: `docker kill` a un worker), observar el panel **Mensajes en DLQ** y verificar que el reasignador devuelva los fragmentos sin pérdida de datos.
+3. **Consumo de recursos:** Validar que los pods de workers escalen su consumo de CPU hacia el límite fijado en los manifiestos (`1000m`).
+4. **DLQ y reintentos:** En la celda que mata un worker, observar el panel **Mensajes en DLQ** y verificar que el reasignador devuelva los fragmentos sin pérdida de datos.

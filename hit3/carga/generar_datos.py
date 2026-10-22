@@ -50,7 +50,7 @@ def obtener_secreto() -> str:
     1. Variable de entorno 'SOBEL_SECRETO' (prioridad máxima, útil en CI/CD o Kubernetes).
     2. Archivo .env.secrets en la carpeta local, en hit3/ o en la raíz del repositorio
        (generado de forma segura mediante crear_secretos.sh).
-    3. Valor de contingencia por defecto si no se halla configuración previa.
+    Si no lo encuentra devuelve None: con un secreto inventado, todos los tokens darían 401.
     """
     # 1. Verificar si la variable de entorno ya está presente
     if "SOBEL_SECRETO" in os.environ and os.environ["SOBEL_SECRETO"]:
@@ -76,12 +76,7 @@ def obtener_secreto() -> str:
             except Exception:
                 pass
     
-    # 3. Valor fallback de desarrollo si no existe secreto configurado
-    return "secreto-sobel-super-seguro"
-
-
-# Secreto por defecto inicializado al cargar el módulo
-SOBEL_SECRETO_DEFAULT = obtener_secreto()
+    return None
 
 
 # ==============================================================================
@@ -148,7 +143,7 @@ def emitir_jwt(sub: str, role: str, secret: str, ttl_s: int = 3600, exp: int = N
 # ==============================================================================
 # Función: Generación del Conjunto de Tokens de Prueba
 # ==============================================================================
-def generar_tokens(secret: str = SOBEL_SECRETO_DEFAULT, cant_usuarios: int = 50) -> Path:
+def generar_tokens(secret: str, cant_usuarios: int = 50) -> Path:
     """
     Genera y guarda en disco la base de datos de tokens para la prueba de carga k6.
     
@@ -192,6 +187,7 @@ def generar_imagenes():
       - V1 = 1mb  -> Imagen mediana de 600x600 píxeles.
       - V1 = 10mb -> Imagen pesada de 1850x1850 píxeles.
       - V1 = 50mb -> Imagen masiva de 4150x4150 píxeles (con compresión rápida).
+      - V1 = 100mb -> Tope del contrato (100 MiB por archivo): 5750x5750 píxeles, unos 95 MiB.
       - Imagen corrupta -> Archivo con extensión .png pero con cabecera binaria inválida.
       - Archivo de texto -> Archivo de texto plano para probar tipo MIME erróneo.
     """
@@ -241,6 +237,12 @@ def generar_imagenes():
     Image.fromarray(arr_50m).save(path_50m, format="PNG", compress_level=1)
     print(f"[OK] Creada {path_50m.name} ({path_50m.stat().st_size / 1024 / 1024:.2f} MB)")
 
+    # V1 = 100mb: el extremo del enunciado (1 KB → 100 MB), justo debajo del límite de 100 MiB por archivo
+    path_100m = DIR_DATOS / "img_100mb.png"
+    arr_100m = np.random.randint(0, 256, (5750, 5750, 3), dtype=np.uint8)
+    Image.fromarray(arr_100m).save(path_100m, format="PNG", compress_level=1)
+    print(f"[OK] Creada {path_100m.name} ({path_100m.stat().st_size / 1024 / 1024:.2f} MB)")
+
     # --------------------------------------------------------------------------
     # 5. Imagen deliberadamente corrupta: cabecera inválida
     # --------------------------------------------------------------------------
@@ -268,7 +270,9 @@ def main():
     DIR_DATOS.mkdir(parents=True, exist_ok=True)
     
     # Obtiene la clave simétrica en uso para la firma
-    secreto = os.environ.get("SOBEL_SECRETO", SOBEL_SECRETO_DEFAULT)
+    secreto = obtener_secreto()
+    if not secreto:
+        sys.exit("[ERROR] Falta SOBEL_SECRETO: exportalo o generá .env.secrets con hit3/k8s/crear_secretos.sh.")
     
     print("=== Generando datos sintéticos para pruebas de carga k6 ===")
     print(f"Directorio de salida: {DIR_DATOS}")

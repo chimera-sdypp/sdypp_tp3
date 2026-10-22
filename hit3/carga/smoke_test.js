@@ -60,13 +60,8 @@ const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-wor
 // ==============================================================================
 
 // Carga del archivo con tokens sintéticos JWT
-let tokens;
-try {
-  tokens = JSON.parse(open('./datos/tokens.json'));
-} catch (e) {
-  // En caso de que no se haya ejecutado generar_datos.py, se provee un objeto mínimo
-  tokens = { usuarios: { user_01: 'token_dummy' }, admin: 'token_admin', expirado: 'token_expirado' };
-}
+// Sin tokens válidos el smoke daría 401 en todo: si falta el archivo, open() corta acá (lo crea generar_datos.py).
+const tokens = JSON.parse(open('./datos/tokens.json'));
 
 // Carga de la imagen de prueba pequeña (1 KB)
 let img1kb;

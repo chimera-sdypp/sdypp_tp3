@@ -71,7 +71,7 @@ const VB = parseInt(__ENV.VB || '1', 10);
 // Dimensión VC: Concurrencia de usuarios virtuales (VUs) simultáneos (1, 10, o 50).
 const VC = parseInt(__ENV.VC || '1', 10);
 
-// Dimensión V1: Calibre del archivo de imagen ('1kb', '1mb', '10mb', o '50mb').
+// Dimensión V1: Calibre del archivo de imagen ('1kb', '1mb', '10mb', '50mb' o '100mb').
 const V1 = __ENV.V1 || '1mb';
 
 // Dimensión V3: Cantidad de réplicas de workers activas (se etiqueta en k6 para correlación en Grafana).
@@ -86,16 +86,9 @@ const RAMP_UP = __ENV.RAMP_UP || '5s';
 // Bandera booleana para decidir si cada VU sondea el estado del job hasta su finalización (default: true).
 const POLL_JOB = __ENV.POLL_JOB !== 'false';
 
-// Límite máximo de tiempo en segundos para esperar que un job pase a estado 'done' (timeout de sondeo).
-const MAX_POLL_TIMEOUT_S = parseInt(__ENV.MAX_POLL_TIMEOUT_S || '45', 10);
-
 // Referencia de la imagen OCI del worker a utilizar en el pipeline (según Contrato Sección 4).
 const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.0.0';
 
-// Cálculo del umbral máximo tolerable en milisegundos para el SLO 2:
-// - Pedidos mayores a 10 MB (ej: V1='50mb' o V1='10mb' con múltiples archivos VA>1): límite 120 segundos.
-// - Pedidos menores o iguales a 10 MB: límite 30 segundos (30.000 ms).
-const SLO_TOTAL_THRESHOLD_MS = (V1 === '50mb' || (V1 === '10mb' && VA > 1)) ? 120000 : 30000;
 
 // ==============================================================================
 // Configuración de Ejecución de k6 (Options)
@@ -131,39 +124,55 @@ export const options = {
 // ==============================================================================
 
 // Carga del archivo de tokens JWT pre-generados por generar_datos.py
-let tokens;
-try {
-  // Lee de forma síncrona el JSON con tokens emitidos mediante HMAC-SHA256
-  tokens = JSON.parse(open('./datos/tokens.json'));
-} catch (_) {
-  // Mecanismo de resguardo si no se ejecutó previamente generar_datos.py
-  tokens = { usuarios: { user_01: 'dummy' }, admin: 'dummy', expirado: 'dummy' };
-}
+// Sin datos no se mide: si falta un archivo, open() aborta la corrida en vez de medir otra cosa
+// (tokens falsos que darían 401, o una imagen de otro tamaño etiquetada como V1). Los crea generar_datos.py.
+const tokens = JSON.parse(open('./datos/tokens.json'));
 
 // Carga en memoria binaria del archivo de imagen correspondiente al tamaño V1 seleccionado
-let imgBytes;
-try {
-  imgBytes = open(`./datos/img_${V1}.png`, 'b');
-} catch (_) {
-  // Advertencia informativa en consola si la imagen solicitada aún no fue sintetizada
-  console.warn(`[ADVERTENCIA] No se encontró ./datos/img_${V1}.png. Reintentando con img_1kb.png.`);
-  try {
-    imgBytes = open('./datos/img_1kb.png', 'b');
-  } catch (err) {
-    imgBytes = null; // En caso extremo sin imágenes, se controlará en la iteración
-  }
-}
+const imgBytes = open(`./datos/img_${V1}.png`, 'b');
 
 // Carga de la imagen deliberadamente corrupta para probar el rechazo estricto del backend
-let imgCorrupta;
-try {
-  imgCorrupta = open('./datos/corrupta.png', 'b');
-} catch (_) {
-  imgCorrupta = null;
-}
+const imgCorrupta = open('./datos/corrupta.png', 'b');
+
+// Umbral del SLO 2 (contrato §8): 30 s para pedidos de hasta 10 MiB en total, 120 s para los más grandes.
+// Cuenta el pedido entero (VA archivos de V1), no sólo el tamaño de cada imagen.
+const BYTES_PEDIDO = VA * imgBytes.byteLength;
+const SLO_TOTAL_THRESHOLD_MS = BYTES_PEDIDO > 10 * 1024 * 1024 ? 120000 : 30000;
+
+// Tiempo máximo de sondeo de un job: por defecto, el umbral del SLO 2 más 30 s de margen. Si fuera menor
+// que el umbral, los jobs lentos se contarían como error y quedarían fuera del p95.
+const MAX_POLL_TIMEOUT_S = parseInt(__ENV.MAX_POLL_TIMEOUT_S || `${SLO_TOTAL_THRESHOLD_MS / 1000 + 30}`, 10);
 
 // Extrae el listado de identificadores de usuarios ('user_01', 'user_02', ...) para rotar VUs
 const userKeys = Object.keys(tokens.usuarios || {});
+
+// k6 no sabe mandar varios archivos en el mismo campo: con una lista de http.file arma un
+// x-www-form-urlencoded sin los archivos, y el backend contesta 415. El multipart se arma a mano.
+function multipart(operaciones, archivos) {
+  const limite = `----sobel${Math.random().toString(16).slice(2)}`;
+  const ascii = (texto) => {
+    const bytes = new Uint8Array(texto.length);
+    for (let i = 0; i < texto.length; i++) bytes[i] = texto.charCodeAt(i);
+    return bytes;
+  };
+  const partes = [ascii(`--${limite}\r\nContent-Disposition: form-data; name="operaciones"\r\n\r\n${operaciones}\r\n`)];
+  for (const [nombre, bytes] of archivos) {
+    partes.push(ascii(`--${limite}\r\nContent-Disposition: form-data; name="archivos"; filename="${nombre}"\r\n` +
+                      'Content-Type: image/png\r\n\r\n'));
+    partes.push(new Uint8Array(bytes), ascii('\r\n'));
+  }
+  partes.push(ascii(`--${limite}--\r\n`));
+  const cuerpo = new Uint8Array(partes.reduce((total, parte) => total + parte.length, 0));
+  let desde = 0;
+  for (const parte of partes) {
+    cuerpo.set(parte, desde);
+    desde += parte.length;
+  }
+  return { cuerpo: cuerpo.buffer, tipo: `multipart/form-data; boundary=${limite}` };
+}
+
+// El pedido válido es siempre el mismo dentro de un VU: se arma en la primera iteración y se reusa.
+let pedidoValido = null;
 
 // ==============================================================================
 // Función Auxiliar: Construcción del Pipeline de Operaciones (Dimensión VB)
@@ -237,7 +246,7 @@ export default function () {
   // Caso de Prueba 2: Operación no soportada con archivo válido (4% de probabilidad)
   // ----------------------------------------------------------------------------
   // Objetivo: Comprobar que el validador semántico devuelva HTTP 422 OPERACION_NO_SOPORTADA.
-  if (rand >= 0.05 && rand < 0.09 && imgBytes) {
+  if (rand >= 0.05 && rand < 0.09) {
     const payload = {
       operaciones: JSON.stringify([{ operacion: 'rotar_invalida', imagen: DEFAULT_IMAGE_REF }]),
       archivos: http.file(imgBytes, 'test.png', 'image/png'),
@@ -266,7 +275,7 @@ export default function () {
   // Caso de Prueba 3: Archivo corrupto con operaciones válidas (4% de probabilidad)
   // ----------------------------------------------------------------------------
   // Objetivo: Comprobar que la validación de cabeceras de imagen devuelva HTTP 422 ARCHIVO_INVALIDO.
-  if (rand >= 0.09 && rand < 0.13 && imgCorrupta) {
+  if (rand >= 0.09 && rand < 0.13) {
     const payload = {
       operaciones: construirOperaciones(VB, false),
       archivos: http.file(imgCorrupta, 'corrupta.png', 'image/png'),
@@ -295,27 +304,11 @@ export default function () {
   // Petición Válida según parámetros VA x VB x VC x V1 (Tráfico Nominal del SLO)
   // ============================================================================
 
-  // Verificación de resguardo: confirmar que el buffer de imagen esté disponible
-  if (!imgBytes) {
-    console.error(`[ERROR] No se dispone de la imagen para la dimensión V1=${V1}`);
-    sleep(1);
-    return;
+  // Cuerpo multipart con VA copias de la imagen V1 (1, 10 o 50 archivos) y las VB operaciones
+  if (pedidoValido === null) {
+    const archivos = Array.from({ length: VA }, (_, i) => [`imagen_${i}.png`, imgBytes]);
+    pedidoValido = multipart(construirOperaciones(VB, false), archivos);
   }
-
-  // Construcción del arreglo de archivos multipart según la dimensión VA (1, 10 o 50 imágenes)
-  const fileArray = [];
-  for (let i = 0; i < VA; i++) {
-    // Empaqueta cada imagen con un nombre distintivo y tipo MIME 'image/png'
-    fileArray.push(http.file(imgBytes, `imagen_${i}.png`, 'image/png'));
-  }
-
-  // Estructura del cuerpo multipart/form-data:
-  // - 'operaciones': cadena JSON con el arreglo de transformaciones.
-  // - 'archivos': un único archivo si VA=1, o un arreglo de archivos si VA > 1.
-  const payload = {
-    operaciones: construirOperaciones(VB, false),
-    archivos: (VA === 1) ? fileArray[0] : fileArray,
-  };
 
   // Cabeceras HTTP: Portador de credencial JWT y etiqueta para métricas de k6
   const params = {
@@ -328,7 +321,10 @@ export default function () {
   // Medición de alta precisión de la latencia de aceptación del backend
   const startTime = Date.now();
   // Envío de la petición HTTP POST asíncrona hacia el endpoint de ingreso
-  const res = http.post(`${TARGET_URL}/jobs`, payload, params);
+  const res = http.post(`${TARGET_URL}/jobs`, pedidoValido.cuerpo, {
+    headers: { ...params.headers, 'Content-Type': pedidoValido.tipo },
+    tags: params.tags,
+  });
   const postDuration = Date.now() - startTime;
 
   // Registro del tiempo de respuesta en el histograma de latencia de k6
@@ -358,11 +354,10 @@ export default function () {
     return; // Aborta el sondeo de este job para no procesar un ID inexistente
   }
 
-  // Si el POST fue aceptado correctamente, registramos un 0 en errores
-  sloErrors.add(0);
-
-  // Si el usuario configuró POLL_JOB=false (modo solo ingesta), finaliza aquí
+  // Si el usuario configuró POLL_JOB=false (modo solo ingesta), el POST aceptado es el resultado del pedido.
+  // Si no, el resultado es cómo termina el job: una sola muestra por pedido en slo_unexpected_errors.
   if (!POLL_JOB) {
+    sloErrors.add(0);
     sleep(1);
     return;
   }
@@ -374,13 +369,12 @@ export default function () {
   // Extrae el identificador único del trabajo distribuido recién creado
   const jobId = res.json().contenido.job_id;
   let jobFinished = false;
-  let pollAttempts = 0;
+  const limiteSondeo = startTime + MAX_POLL_TIMEOUT_S * 1000;
 
-  // Bucle de consulta de estado periódica (polling) cada 1 segundo:
-  while (!jobFinished && pollAttempts < MAX_POLL_TIMEOUT_S) {
+  // Bucle de consulta de estado periódica (polling) cada 1 segundo, hasta el límite de tiempo:
+  while (!jobFinished && Date.now() < limiteSondeo) {
     // Pausa de 1 segundo entre consultas sucesivas para no saturar la red ni la base de datos
     sleep(1);
-    pollAttempts++;
 
     // Consulta GET /jobs/{jobId} transmitiendo el token del usuario creador
     const pollRes = http.get(`${TARGET_URL}/jobs/${jobId}`, params);
@@ -427,7 +421,9 @@ export default function () {
   // Si el ciclo agotó todos los intentos sin que el job alcanzara estado terminal
   if (!jobFinished) {
     console.warn(`[TIMEOUT] Job ${jobId} no completó su ejecución tras ${MAX_POLL_TIMEOUT_S}s de sondeo.`);
-    // Infracción del SLO 2 por vencimiento de plazo
+    // Infracción del SLO 2 por vencimiento de plazo. El tiempo esperado entra al p95 como cota inferior:
+    // dejarlo afuera haría que el p95 sólo midiera los jobs rápidos.
+    jobTotalDuration.add(Date.now() - startTime);
     sloTotalOk.add(false);
     // Infracción del SLO 3 por procesamiento no completado
     sloErrors.add(1);
