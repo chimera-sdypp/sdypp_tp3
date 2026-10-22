@@ -48,10 +48,10 @@ def preparar_job(redis, archivos=1):
     redis.expire("job:j1", 86400)
 
 
-def preparar_archivo(redis, archivo=0, desde=0):
+def preparar_archivo(redis, archivo=0, corrimiento=0):
     """Deja un archivo de 6 × 4 partido en 3 fragmentos de 2 filas, sin bordes, y ya procesado (paso 1), como lo
-    dejan el split y el worker. `desde` cambia los píxeles, para distinguir archivos. Devuelve la imagen."""
-    imagen = (np.arange(24, dtype=np.uint8).reshape(6, 4) + desde) * 10
+    dejan el split y el worker. `corrimiento` cambia los píxeles, para distinguir archivos. Devuelve la imagen."""
+    imagen = (np.arange(24, dtype=np.uint8).reshape(6, 4) + corrimiento) * 10
     redis.hset(f"job:j1:geometria:{archivo}", mapping={"total": 3, "0": "0,2", "1": "0,2", "2": "0,2"})
     for f in range(3):
         redis.set(f"job:j1:frag:{archivo}:{f}:1", png(imagen[2 * f:2 * f + 2]))
@@ -68,6 +68,10 @@ def mensaje_resultado(job_id="j1", archivo=0, fragmento=0):
     """Lo que publica el worker en sobel.resultados (contrato §9)."""
     return json.dumps({"job_id": job_id, "archivo": archivo, "fragmento": fragmento, "worker": "w1",
                        "ms": 12, "intento": 1}).encode()
+
+
+# Dos uniones y un cierre: la primera unión tarda 40 ms, la segunda 30 y el cierre es a las …96050.
+DOS_UNIONES = (1761055395000, 1761055395040, 1761055396000, 1761055396030, 1761055396050)
 
 
 def manejador(redis, **opciones):
@@ -122,9 +126,9 @@ def test_listos_unidos_y_el_resultado_vencen_con_el_ttl(redis):
 
 def test_un_archivo_completo_se_une_sin_esperar_a_los_otros_y_el_job_cierra_con_el_ultimo(redis):
     preparar_job(redis, archivos=2)
-    primero, segundo = preparar_archivo(redis, 0), preparar_archivo(redis, 1, desde=1)
-    procesar = manejador(redis, ahora_ms=reloj(1761055395000, 1761055395040, 1761055396000, 1761055396030,
-                                               1761055396050))
+    primero = preparar_archivo(redis, 0)
+    segundo = preparar_archivo(redis, 1, corrimiento=1)
+    procesar = manejador(redis, ahora_ms=reloj(*DOS_UNIONES))
 
     for f in range(3):
         procesar(Canal(), mensaje_resultado(archivo=1, fragmento=f))
@@ -142,10 +146,9 @@ def test_un_archivo_completo_se_une_sin_esperar_a_los_otros_y_el_job_cierra_con_
 
 def test_t_join_ms_suma_lo_que_tardo_cada_union(redis):
     preparar_job(redis, archivos=2)
-    preparar_archivo(redis, 0), preparar_archivo(redis, 1, desde=1)
-    # El archivo 0 se une en 40 ms y el 1 en 30 ms; el último instante es el del cierre.
-    procesar = manejador(redis, ahora_ms=reloj(1761055395000, 1761055395040, 1761055396000, 1761055396030,
-                                               1761055396050))
+    preparar_archivo(redis, 0)
+    preparar_archivo(redis, 1, corrimiento=1)
+    procesar = manejador(redis, ahora_ms=reloj(*DOS_UNIONES))
 
     for archivo in (0, 1):
         for f in range(3):
@@ -199,19 +202,6 @@ def aplicar_entera(original, operaciones):
     return original
 
 
-def test_un_job_de_un_archivo_pasa_por_split_worker_y_joiner_y_termina_en_done(redis):
-    original = np.random.default_rng(8).integers(0, 256, (19, 11, 3), dtype=np.uint8)
-    operaciones = [{"operacion": op, "imagen": IMAGEN} for op in ("blur", "sobel")]
-    cargar_job(redis, "j1", [png(original)], operaciones)
-
-    procesar_job(redis, "j1", partes=4)
-
-    assert redis.hget("job:j1", "estado") == b"done"
-    assert redis.hget("job:j1", "completos") == redis.hget("job:j1", "fragmentos_total") == b"4"
-    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:0")), aplicar_entera(original, operaciones))
-    assert redis.keys("job:j1:frag:*") == []
-
-
 @pytest.mark.parametrize("nombres", [
     ["grises"],  # ninguna operación de vecindad: sin filas de borde
     ["sobel"], ["grises", "blur"],  # una operación de vecindad: una fila de borde
@@ -228,7 +218,8 @@ def test_cada_archivo_del_job_sale_igual_que_aplicarle_la_cadena_entero(redis, n
     procesar_job(redis, "j1", partes=4)
 
     assert redis.hget("job:j1", "estado") == b"done"
-    assert redis.hget("job:j1", "completos") == redis.hget("job:j1", "fragmentos_total")
+    # 13 y 7 filas dan 4 fragmentos cada una y 3 filas dan 3: uno por fila.
+    assert redis.hmget("job:j1", "fragmentos_total", "completos") == [b"11", b"11"]
     for archivo, original in enumerate(originales):
         np.testing.assert_array_equal(leer(redis.get(f"job:j1:resultado:{archivo}")),
                                       aplicar_entera(original, operaciones))
