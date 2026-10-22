@@ -336,8 +336,8 @@ escriben a mano.
   archivo no se puede decodificar: `estado=failed`, `error`, `terminado` y la entrada en `terminados`.
 - **worker:** `cola_ms`, `cola_n`, `proc_ms`, `proc_n` (con `HINCRBY`) y `job:<id>:workers`.
 - **joiner:** `completos`, `t_join_ms` (la suma de lo que tardó cada unión), `listos`, `unidos` y los resultados, y
-  al final `estado=done`, `terminado` y la entrada en `terminados`. Borra los fragmentos del último paso después de
-  unir.
+  al final `estado=done`, `terminado` y la entrada en `terminados`, y borra `error` (si el job venía de `dlq`).
+  Borra los fragmentos del último paso después de unir.
 - **reasignador:** `reintentos`. Por cada tarea que manda a `sobel.dlq.agotados`, suma 1 a `en_dlq` (el backend lo
   resta al reprocesar), y la primera vez pasa el job a `dlq` con `error`, `terminado` y la entrada en `terminados`;
   las siguientes sólo suman. Si otro servicio terminó el job justo antes (`done` o `failed`), suma igual y no cambia

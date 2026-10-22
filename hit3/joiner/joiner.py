@@ -92,6 +92,7 @@ def cerrar_si_corresponde(redis, job_id, ahora_ms):
         terminado = ahora_ms()
         transaccion.multi()
         transaccion.hset(clave_job, mapping={"estado": "done", "terminado": terminado})
+        transaccion.hdel(clave_job, "error")  # desde dlq: el error es de antes, y con done no va (contrato §3)
         transaccion.lpush(claves.TERMINADOS, f"done {terminado - int(creado)}")
         transaccion.ltrim(claves.TERMINADOS, 0, 999)
         return True
