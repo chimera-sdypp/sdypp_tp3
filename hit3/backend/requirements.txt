@@ -4,4 +4,3 @@ uvicorn==0.54.0
 python-multipart==0.0.32
 PyJWT==2.15.1
 pillow==12.3.0
-prometheus_client==0.26.0

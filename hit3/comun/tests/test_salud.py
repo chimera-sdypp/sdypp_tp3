@@ -54,9 +54,25 @@ def test_antes_de_conectarse_las_dos_figuran_caidas(levantar):
 
 
 def test_otra_ruta_responde_404(levantar):
-    pedir = levantar("split", {"rabbitmq": "ok", "redis": "ok"}, ruta="/metrics")
+    pedir = levantar("split", {"rabbitmq": "ok", "redis": "ok"}, ruta="/otra")
 
     assert pedir()[0] == 404
+
+
+def test_metrics_responde_en_formato_prometheus_aunque_las_conexiones_esten_caidas():
+    servidor = salud.servir("split", puerto=0, estado={})
+    try:
+        url = f"http://127.0.0.1:{servidor.server_address[1]}/metrics?desde=prometheus"
+        with urllib.request.urlopen(url, timeout=5) as respuesta:
+            codigo, tipo, texto = respuesta.status, respuesta.headers["Content-Type"], respuesta.read().decode()
+    finally:
+        servidor.shutdown()
+        servidor.server_close()
+
+    assert codigo == 200 and tipo.startswith("text/plain")
+    for metrica in ("sobel_tareas_procesadas_total", "sobel_tiempo_tarea_segundos", "sobel_errores_total",
+                    "sobel_tiempo_job_segundos"):
+        assert f"# TYPE {metrica} " in texto, metrica
 
 
 class RedisQueNoResponde:

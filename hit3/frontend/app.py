@@ -21,16 +21,16 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
-from comun import colas, conexion, registro
+from comun import colas, conexion, metricas, registro
 
 ESTATICO = Path(__file__).parent / "estatico"
 LATIDO = 15  # segundos entre comentarios SSE: sin tráfico, el ingress corta la conexión
 EN_ESPERA = 1000  # resultados que se guardan para un navegador lento; los que sobran se pierden
 CSP = "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'"
 
-ERRORES = Counter("sobel_errores_total", "Errores por tipo", ["servicio", "tipo"])
+ERRORES = metricas.ERRORES  # el común: registrarlo dos veces en el proceso no arranca
 MIRANDO = Gauge("sobel_frontend_navegadores", "Navegadores con el avance de un job abierto")
 
 
@@ -184,7 +184,7 @@ def _escuchar(url, difusor, log):
         colas.declarar(canal)
         return colas.declarar_exclusiva(canal)
 
-    conexion.consumir(None, recibir, al_conectar=al_conectar, prefetch=100,
+    conexion.consumir(None, recibir, al_conectar=al_conectar, prefetch=100, servicio="frontend",
                       conectar=lambda: conexion.conectar_rabbitmq(url, log=log), log=log)
 
 

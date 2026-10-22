@@ -5,8 +5,11 @@ import time
 
 import fakeredis
 import numpy as np
+import pika.exceptions
 import pytest
+import redis as redis_lib
 from PIL import Image
+from prometheus_client import REGISTRY
 
 from split import split
 from worker import worker
@@ -396,3 +399,83 @@ def test_una_operacion_que_termina_a_tiempo_deja_el_timer_desarmado(redis):
 
     assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
     assert signal.getsignal(signal.SIGALRM) is handler_anterior
+
+
+# Métricas (contrato §11). El registro de Prometheus es global: cada test mira cuánto sumó.
+
+def muestra(nombre, **etiquetas):
+    return REGISTRY.get_sample_value(nombre, etiquetas) or 0
+
+
+def metricas_de(operacion):
+    return (muestra("sobel_tareas_procesadas_total", servicio="worker", operacion=operacion, resultado="ok"),
+            muestra("sobel_tareas_procesadas_total", servicio="worker", operacion=operacion, resultado="error"),
+            muestra("sobel_tiempo_tarea_segundos_count", servicio="worker", operacion=operacion),
+            muestra("sobel_tiempo_tarea_segundos_sum", servicio="worker", operacion=operacion))
+
+
+def test_cada_tarea_procesada_suma_una_a_su_operacion_con_lo_que_tardo(redis):
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"))
+    antes = metricas_de("blur")
+
+    manejador(redis)(CanalQuePublica(), cuerpo)  # la operación tarda 412 ms
+
+    ok, error, cantidad, suma = (d - a for d, a in zip(metricas_de("blur"), antes))
+    assert (ok, error, cantidad) == (1, 0, 1) and suma == pytest.approx(0.412)
+
+
+def test_una_tarea_que_falla_suma_un_error_a_su_operacion(redis):
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"))
+    antes = metricas_de("blur")
+
+    with pytest.raises(worker.OperacionNoOfrecida):
+        manejador(redis, ofrecidas=["sobel"])(CanalQuePublica(), cuerpo)
+
+    assert [d - a for d, a in zip(metricas_de("blur"), antes)] == [0, 1, 0, 0]
+
+
+def test_lo_que_se_descarta_o_se_reenvia_no_cuenta_como_tarea(redis):
+    vencida = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"), job_id="vencido")
+    redis.delete("job:vencido")
+    sin_nada = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"), indice=5)
+    redis.delete("job:j1:frag:0:5:0")
+    ya_hecha = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"), indice=6)
+    redis.set("job:j1:frag:0:6:1", redis.get("job:j1:frag:0:6:0"))
+    redis.delete("job:j1:frag:0:6:0")
+    antes = metricas_de("blur")
+
+    for cuerpo in (vencida, sin_nada, ya_hecha):
+        manejador(redis)(CanalQuePublica(), cuerpo)
+
+    assert metricas_de("blur") == antes
+
+
+class RedisQueSeCae:
+    """El Redis de verdad, salvo que se cae al leer la entrada de la tarea."""
+
+    def __init__(self, redis):
+        self.redis = redis
+
+    def __getattr__(self, nombre):
+        return getattr(self.redis, nombre)
+
+    def get(self, clave):
+        raise redis_lib.exceptions.ConnectionError("redis caído")
+
+
+class CanalQueSeCae(CanalQuePublica):
+    def basic_publish(self, exchange, routing_key, body, properties=None):
+        raise pika.exceptions.StreamLostError("se cortó la conexión al publicar")
+
+
+@pytest.mark.parametrize("cae", ["redis", "rabbitmq"])
+def test_una_caida_de_redis_o_de_rabbitmq_no_cuenta_como_error_de_la_tarea(redis, cae):
+    # consumir la reencola (o reconecta) y espera: no va a la DLQ, no es culpa de la tarea.
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"))
+    antes = metricas_de("blur")
+    cliente, canal = (RedisQueSeCae(redis), CanalQuePublica()) if cae == "redis" else (redis, CanalQueSeCae())
+
+    with pytest.raises((redis_lib.exceptions.ConnectionError, pika.exceptions.StreamLostError)):
+        manejador(cliente)(canal, cuerpo)
+
+    assert metricas_de("blur") == antes

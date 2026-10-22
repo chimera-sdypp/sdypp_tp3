@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 
-from comun import claves, colas, conexion, pixeles, registro, salud
+from comun import claves, colas, conexion, metricas, pixeles, registro, salud
 from worker.operaciones import OPERACIONES
 
 VIGENCIA_DEL_ANUNCIO = 15  # s: si el worker deja de anunciarse, deja de contar como activo (contrato §10)
@@ -87,40 +87,44 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), funciones=OPERACIONES
             # recrearía sin vencimiento.
             log.warning("job %s no existe, se descarta el fragmento %d del archivo %d", job_id, indice, archivo)
             return
-        if operacion not in ofrecidas:
-            raise OperacionNoOfrecida(f"este worker no ofrece {operacion} (ofrece: {', '.join(ofrecidas)})")
-        datos = redis.get(clave_entrada)
-        if datos is None and redis.exists(clave_salida):
-            # Redelivery de una tarea que ya terminó: se cortó entre el borrado de la entrada y el ack. La salida
-            # está escrita; sólo falta mandarla. Sin sumar tiempos: ya se contaron (y no se sabe cuánto tardó).
-            destino = mandar_adelante(canal, tarea, nombre, 0, ahora_ms)
-            log.info("job %s: archivo %d, fragmento %d ya estaba hecho, se manda de nuevo → %s",
-                     job_id, archivo, indice, destino)
-            return
-        if datos is None:
-            # Ni reintentarla ni la DLQ lo arreglan: el fragmento ya no existe (venció, o el joiner ya lo unió).
-            log.warning("job %s: archivo %d, fragmento %d sin entrada ni salida del paso %d, se descarta",
-                        job_id, archivo, indice, paso)
-            return
-        entrada = pixeles.leer(datos)
-        inicio = ahora_ms()
-        with tiempo_limite(timeout):  # sólo la operación: cortar una llamada a Redis o a RabbitMQ deja todo a medias
-            salida = funciones[operacion](entrada)
-        proc_ms = ahora_ms() - inicio
-        redis.set(clave_salida, pixeles.a_png(salida), ex=ttl)
-        destino = mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms)
-        log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s",
-                 job_id, archivo, indice, operacion, proc_ms, destino)
-        with redis.pipeline() as transaccion:  # sumas y cantidades para los promedios de tiempos_s (contrato §3)
-            transaccion.hincrby(clave_job, "cola_ms", recibida - tarea["encolado"])
-            transaccion.hincrby(clave_job, "cola_n", 1)
-            transaccion.hincrby(clave_job, "proc_ms", proc_ms)
-            transaccion.hincrby(clave_job, "proc_n", 1)
-            transaccion.sadd(claves.workers(job_id), nombre)
-            transaccion.expire(claves.workers(job_id), ttl)
-            transaccion.execute()
-        # Se borra acá y no después del ack porque `consumir` hace el ack al volver del callback.
-        redis.delete(clave_entrada)
+        # Desde acá, lo que falle va a la DLQ y cuenta como error de la operación (contrato §11).
+        with metricas.fallos("worker", operacion):
+            if operacion not in ofrecidas:
+                raise OperacionNoOfrecida(f"este worker no ofrece {operacion} (ofrece: {', '.join(ofrecidas)})")
+            datos = redis.get(clave_entrada)
+            if datos is None and redis.exists(clave_salida):
+                # Redelivery de una tarea que ya terminó: se cortó entre el borrado de la entrada y el ack. La salida
+                # está escrita; sólo falta mandarla. Sin sumar tiempos: ya se contaron (y no se sabe cuánto tardó).
+                destino = mandar_adelante(canal, tarea, nombre, 0, ahora_ms)
+                log.info("job %s: archivo %d, fragmento %d ya estaba hecho, se manda de nuevo → %s",
+                         job_id, archivo, indice, destino)
+                return
+            if datos is None:
+                # Ni reintentarla ni la DLQ lo arreglan: el fragmento ya no existe (venció, o el joiner ya lo unió).
+                log.warning("job %s: archivo %d, fragmento %d sin entrada ni salida del paso %d, se descarta",
+                            job_id, archivo, indice, paso)
+                return
+            entrada = pixeles.leer(datos)
+            inicio = ahora_ms()
+            # Sólo la operación: cortar una llamada a Redis o a RabbitMQ deja todo a medias.
+            with tiempo_limite(timeout):
+                salida = funciones[operacion](entrada)
+            proc_ms = ahora_ms() - inicio
+            redis.set(clave_salida, pixeles.a_png(salida), ex=ttl)
+            destino = mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms)
+            log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s",
+                     job_id, archivo, indice, operacion, proc_ms, destino)
+            with redis.pipeline() as transaccion:  # sumas y cantidades para los promedios de tiempos_s (contrato §3)
+                transaccion.hincrby(clave_job, "cola_ms", recibida - tarea["encolado"])
+                transaccion.hincrby(clave_job, "cola_n", 1)
+                transaccion.hincrby(clave_job, "proc_ms", proc_ms)
+                transaccion.hincrby(clave_job, "proc_n", 1)
+                transaccion.sadd(claves.workers(job_id), nombre)
+                transaccion.expire(claves.workers(job_id), ttl)
+                transaccion.execute()
+            # Se borra acá y no después del ack porque `consumir` hace el ack al volver del callback.
+            redis.delete(clave_entrada)
+        metricas.trabajo("worker", operacion, proc_ms / 1000)
 
     return procesar
 
@@ -189,7 +193,7 @@ def main():
 
     log.info("worker %s consumiendo sobel.tareas.%s, ofrece %s", nombre, imagen, ",".join(ofrecidas))
     tareas = manejador(redis, nombre, ofrecidas, timeout=timeout, ttl=ttl, log=log)
-    conexion.consumir(None, tareas, al_conectar=al_conectar, cliente_redis=redis, log=log)
+    conexion.consumir(None, tareas, al_conectar=al_conectar, cliente_redis=redis, servicio="worker", log=log)
 
 
 if __name__ == "__main__":

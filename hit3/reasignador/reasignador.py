@@ -192,7 +192,7 @@ def main():
     conexion.con_backoff(redis.ping, "redis", log=log)
     log.info("reasignador consumiendo %s, con %d reintentos por tarea", colas.DLQ, reintentos_max)
     conexion.consumir(colas.DLQ, manejador(redis, reintentos_max, log=log), al_conectar=colas.declarar,
-                      cliente_redis=redis, con_propiedades=True, log=log)
+                      cliente_redis=redis, con_propiedades=True, servicio="reasignador", log=log)
 
 
 if __name__ == "__main__":

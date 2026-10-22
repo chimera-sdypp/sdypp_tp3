@@ -129,7 +129,7 @@ def main():
     conexion.con_backoff(redis.ping, "redis", log=log)
     log.info("split consumiendo %s, %d partes por archivo", colas.SPLIT, partes)
     conexion.consumir(colas.SPLIT, manejador(redis, partes, ttl, log=log), al_conectar=colas.declarar,
-                      cliente_redis=redis, log=log)
+                      cliente_redis=redis, servicio="split", log=log)
 
 
 if __name__ == "__main__":

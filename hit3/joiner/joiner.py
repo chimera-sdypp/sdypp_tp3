@@ -140,7 +140,7 @@ def main():
     conexion.con_backoff(redis.ping, "redis", log=log)
     log.info("joiner consumiendo %s", colas.JOINER)
     conexion.consumir(colas.JOINER, manejador(redis, ttl, log=log), al_conectar=colas.declarar,
-                      cliente_redis=redis, log=log)
+                      cliente_redis=redis, servicio="joiner", log=log)
 
 
 if __name__ == "__main__":
