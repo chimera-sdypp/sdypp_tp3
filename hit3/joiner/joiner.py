@@ -27,15 +27,18 @@ def contar(redis, job_id, archivo, indice, ttl):
     redis.transaction(escribir, clave_listos)
 
 
-def unir_si_corresponde(redis, job_id, archivo, pasos, ttl, ahora_ms, log):
+def unir_si_corresponde(redis, job_id, archivo, ttl, ahora_ms):
     """Si el archivo tiene todos sus fragmentos completos y no está en `unidos`, lo une y lo marca.
+
+    Devuelve (fragmentos, ms que tardó) si lo unió, o None si todavía no correspondía.
 
     El orden hace segura una reentrega: hasta el SADD en `unidos`, los fragmentos del último paso siguen ahí y
     otra pasada vuelve a unir. Dos réplicas que lo ven completo a la vez escriben los mismos bytes.
     """
     geometria = pixeles.leer_geometria(redis.hgetall(claves.geometria(job_id, archivo)))
     if redis.scard(claves.listos(job_id, archivo)) < len(geometria) or redis.sismember(claves.unidos(job_id), archivo):
-        return
+        return None
+    pasos = len(json.loads(redis.hget(claves.job(job_id), "operaciones")))  # el último paso es el de la cadena entera
     fragmentos = [claves.fragmento(job_id, archivo, indice, pasos) for indice in range(len(geometria))]
     inicio = ahora_ms()
     imagen = pixeles.unir([pixeles.leer(datos) for datos in redis.mget(fragmentos)], geometria)
@@ -47,18 +50,18 @@ def unir_si_corresponde(redis, job_id, archivo, pasos, ttl, ahora_ms, log):
         transaccion.expire(claves.unidos(job_id), ttl)
         transaccion.execute()
     redis.delete(*fragmentos)  # recién ahora: ya está en `unidos`, nadie los vuelve a necesitar
-    log.info("job %s: archivo %d unido (%d fragmentos) en %d ms", job_id, archivo, len(geometria), t_join_ms)
+    return len(geometria), t_join_ms
 
 
-def cerrar_si_corresponde(redis, job_id, ahora_ms, log):
+def cerrar_si_corresponde(redis, job_id, ahora_ms):
     """Si están unidos todos los archivos, pasa el job a done con `terminado` y la entrada en `terminados`.
 
     Todo junto y una sola vez: el WATCH reintenta si el job cambia en el medio, y un job que ya está en done o en
-    failed no se toca, así otra réplica o una reentrega no lo cuentan dos veces en /stats.
+    failed no se toca, así otra réplica o una reentrega no lo cuentan dos veces en /stats. Devuelve si lo cerró.
     """
     clave_job = claves.job(job_id)
     if redis.scard(claves.unidos(job_id)) < int(redis.hget(clave_job, "archivos")):
-        return
+        return False
 
     def escribir(transaccion):
         estado, creado = transaccion.hmget(clave_job, "estado", "creado")
@@ -71,8 +74,7 @@ def cerrar_si_corresponde(redis, job_id, ahora_ms, log):
         transaccion.ltrim(claves.TERMINADOS, 0, 999)
         return True
 
-    if redis.transaction(escribir, clave_job, value_from_callable=True):
-        log.info("job %s: done", job_id)
+    return redis.transaction(escribir, clave_job, value_from_callable=True)
 
 
 def manejador(redis, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.joiner")):
@@ -82,8 +84,10 @@ def manejador(redis, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=loggi
         mensaje = json.loads(cuerpo)
         job_id, archivo = mensaje["job_id"], mensaje["archivo"]
         contar(redis, job_id, archivo, mensaje["fragmento"], ttl)
-        pasos = len(json.loads(redis.hget(claves.job(job_id), "operaciones")))
-        unir_si_corresponde(redis, job_id, archivo, pasos, ttl, ahora_ms, log)
-        cerrar_si_corresponde(redis, job_id, ahora_ms, log)
+        unido = unir_si_corresponde(redis, job_id, archivo, ttl, ahora_ms)
+        if unido:
+            log.info("job %s: archivo %d unido (%d fragmentos) en %d ms", job_id, archivo, *unido)
+        if cerrar_si_corresponde(redis, job_id, ahora_ms):
+            log.info("job %s: done", job_id)
 
     return procesar
