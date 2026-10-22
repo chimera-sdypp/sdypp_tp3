@@ -7,6 +7,7 @@ import numpy as np
 import pika.exceptions
 import pytest
 from PIL import Image
+from prometheus_client import REGISTRY
 
 from split import split
 
@@ -324,3 +325,56 @@ def test_un_job_failed_tambien_borra_las_entradas(redis):
 
     assert redis.hget("job:j1", "estado") == b"failed"
     assert redis.keys("job:j1:entrada:*") == []
+
+
+# Métricas (contrato §11). El registro de Prometheus es global: cada test mira cuánto sumó.
+
+def metricas_del_split():
+    def muestra(nombre, **etiquetas):
+        return REGISTRY.get_sample_value(nombre, etiquetas) or 0
+    return (muestra("sobel_tareas_procesadas_total", servicio="split", operacion="split", resultado="ok"),
+            muestra("sobel_tareas_procesadas_total", servicio="split", operacion="split", resultado="error"),
+            muestra("sobel_tiempo_tarea_segundos_sum", servicio="split", operacion="split"),
+            muestra("sobel_errores_total", servicio="split", tipo="ARCHIVO_INVALIDO"))
+
+
+def diferencia(antes):
+    return [d - a for d, a in zip(metricas_del_split(), antes)]
+
+
+def test_cada_job_partido_suma_uno_con_lo_que_tardo(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(9, 4))])
+    antes = metricas_del_split()
+
+    split.manejador(redis, partes=3, ahora_ms=reloj(1000, 1250))(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    assert diferencia(antes) == [1, 0, pytest.approx(0.25), 0]
+
+
+def test_un_archivo_que_no_se_decodifica_cuenta_como_error_archivo_invalido(redis):
+    cargar_job(redis, "j1", [b"no soy una imagen"])
+    antes = metricas_del_split()
+
+    split.manejador(redis, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
+
+    assert diferencia(antes) == [0, 1, 0, 1]
+
+
+def test_un_job_que_no_existe_o_ya_se_repartio_no_cuenta(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(4, 4))])
+    redis.hset("job:j1", "estado", "processing")
+    antes = metricas_del_split()
+
+    for job_id in ("j1", "no-existe"):
+        split.manejador(redis, partes=2)(CanalQuePublica(), json.dumps({"job_id": job_id}).encode())
+
+    assert diferencia(antes) == [0, 0, 0, 0]
+
+
+def test_un_job_que_va_a_la_dlq_cuenta_como_error(redis):
+    antes = metricas_del_split()
+
+    with pytest.raises(ValueError):
+        split.manejador(redis, partes=2)(CanalQuePublica(), b"no es json")
+
+    assert diferencia(antes) == [0, 1, 0, 0]

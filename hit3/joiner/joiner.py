@@ -7,7 +7,7 @@ import signal
 import sys
 import time
 
-from comun import claves, colas, conexion, pixeles, registro, salud
+from comun import claves, colas, conexion, metricas, pixeles, registro, salud
 
 
 def ahora_en_ms():
@@ -79,23 +79,24 @@ def cerrar_si_corresponde(redis, job_id, ahora_ms):
     """Si están unidos todos los archivos, pasa el job a done con `terminado` y la entrada en `terminados`.
 
     Todo junto y una sola vez: el WATCH reintenta si el job cambia en el medio, y un job que ya está en done o en
-    failed no se toca, así otra réplica o una reentrega no lo cuentan dos veces en /stats. Devuelve si lo cerró.
+    failed no se toca, así otra réplica o una reentrega no lo cuentan dos veces en /stats. Devuelve cuántos ms tardó el
+    job (de `creado` a `terminado`) si lo cerró, o None.
     """
     clave_job = claves.job(job_id)
     if redis.scard(claves.unidos(job_id)) < int(redis.hget(clave_job, "archivos")):
-        return False
+        return None
 
     def escribir(transaccion):
         estado, creado = transaccion.hmget(clave_job, "estado", "creado")
         if estado in (b"done", b"failed"):
-            return False
+            return None
         terminado = ahora_ms()
         transaccion.multi()
         transaccion.hset(clave_job, mapping={"estado": "done", "terminado": terminado})
         transaccion.hdel(clave_job, "error")  # desde dlq: el error es de antes, y con done no va (contrato §3)
         transaccion.lpush(claves.TERMINADOS, f"done {terminado - int(creado)}")
         transaccion.ltrim(claves.TERMINADOS, 0, 999)
-        return True
+        return terminado - int(creado)
 
     return redis.transaction(escribir, clave_job, value_from_callable=True)
 
@@ -104,6 +105,10 @@ def manejador(redis, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=loggi
     """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada fragmento completo de sobel.joiner."""
 
     def procesar(canal, cuerpo):
+        with metricas.fallos("joiner", "join"):  # lo que lance va a la DLQ y cuenta como error (contrato §11)
+            juntar(canal, cuerpo)
+
+    def juntar(canal, cuerpo):
         mensaje = json.loads(cuerpo)
         job_id, archivo = mensaje["job_id"], mensaje["archivo"]
         if not contar(redis, job_id, archivo, mensaje["fragmento"], ttl):
@@ -114,8 +119,11 @@ def manejador(redis, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=loggi
         unido = unir_si_corresponde(redis, job_id, archivo, ttl, ahora_ms)
         if unido:
             log.info("job %s: archivo %d unido (%d fragmentos) en %d ms", job_id, archivo, *unido)
-        if cerrar_si_corresponde(redis, job_id, ahora_ms):
-            log.info("job %s: done", job_id)
+            metricas.trabajo("joiner", "join", unido[1] / 1000)
+        total_ms = cerrar_si_corresponde(redis, job_id, ahora_ms)
+        if total_ms is not None:
+            log.info("job %s: done en %d ms", job_id, total_ms)
+            metricas.TIEMPO_JOB.observe(total_ms / 1000)
 
     return procesar
 

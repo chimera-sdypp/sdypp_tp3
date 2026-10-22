@@ -8,7 +8,7 @@ import signal
 import sys
 import time
 
-from comun import claves, colas, conexion, registro, salud
+from comun import claves, colas, conexion, metricas, registro, salud
 
 TAREA = "tarea"  # el origen de lo que vino de una sobel.tareas.<imagen>; los otros son sobel.split y sobel.joiner
 CAMPOS_DE_TAREA = ("archivo", "fragmento", "paso", "operaciones", "intento")  # los del §9 que usa el reasignador
@@ -140,6 +140,7 @@ def manejador(redis, reintentos_max, ahora_ms=ahora_en_ms, log=logging.getLogger
         except Ilegible as problema:
             # sobel.dlq no tiene DLX: un nack lo descartaría igual, así que se descarta con el detalle en el log.
             log.error("mensaje ilegible en %s, se descarta: %s", colas.DLQ, problema)
+            metricas.ERRORES.labels("reasignador", "MENSAJE_ILEGIBLE").inc()
             return
         job_id = mensaje["job_id"]
         estado_actual = redis.hget(claves.job(job_id), "estado")
@@ -153,11 +154,17 @@ def manejador(redis, reintentos_max, ahora_ms=ahora_en_ms, log=logging.getLogger
                 log.warning("job %s ya está en %s, se descarta una tarea del archivo %d", job_id,
                             estado_actual.decode(), mensaje["archivo"])
             elif mensaje["intento"] <= reintentos_max:
-                intento = reintentar(canal, redis, mensaje, ahora_ms)
+                inicio = ahora_ms()
+                with metricas.fallos("reasignador", "reasignar"):
+                    intento = reintentar(canal, redis, mensaje, ahora_ms)
+                metricas.trabajo("reasignador", "reasignar", (ahora_ms() - inicio) / 1000)
                 log.info("job %s: archivo %d, fragmento %d, paso %d (%s): intento %d", job_id, mensaje["archivo"],
                          mensaje["fragmento"], mensaje["paso"], motivo, intento)
             else:
-                agotar(canal, redis, mensaje, motivo, ahora_ms)
+                inicio = ahora_ms()
+                with metricas.fallos("reasignador", "agotar"):
+                    agotar(canal, redis, mensaje, motivo, ahora_ms)
+                metricas.trabajo("reasignador", "agotar", (ahora_ms() - inicio) / 1000)
                 log.warning("job %s: el fragmento %d del archivo %d agotó los reintentos en el paso %d (%s), va a %s",
                             job_id, mensaje["fragmento"], mensaje["archivo"], mensaje["paso"], motivo, colas.AGOTADOS)
         else:

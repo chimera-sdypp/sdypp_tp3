@@ -5,6 +5,7 @@ import fakeredis
 import numpy as np
 import pytest
 from PIL import Image
+from prometheus_client import REGISTRY
 
 from joiner import joiner
 from split import split
@@ -386,3 +387,51 @@ def test_con_sobel_solo_cada_archivo_es_identico_al_sobel_centralizado_del_hit1(
     for archivo, original in enumerate(originales):
         np.testing.assert_array_equal(leer(redis.get(f"job:j1:resultado:{archivo}")),
                                       sobel_hit1.aplicar(sobel_hit1.leer_gris(png(original))))
+
+
+# Métricas (contrato §11). El registro de Prometheus es global: cada test mira cuánto sumó.
+
+def metricas_del_joiner():
+    def muestra(nombre, **etiquetas):
+        return REGISTRY.get_sample_value(nombre, etiquetas) or 0
+    return (muestra("sobel_tareas_procesadas_total", servicio="joiner", operacion="join", resultado="ok"),
+            muestra("sobel_tareas_procesadas_total", servicio="joiner", operacion="join", resultado="error"),
+            muestra("sobel_tiempo_tarea_segundos_sum", servicio="joiner", operacion="join"),
+            muestra("sobel_tiempo_job_segundos_count"), muestra("sobel_tiempo_job_segundos_sum"))
+
+
+def test_cada_archivo_unido_suma_uno_con_lo_que_tardo_y_el_job_en_done_observa_su_tiempo(redis):
+    preparar_archivo_terminado(redis)
+    procesar = manejador(redis)  # une en 40 ms y cierra a las …95050: 4050 ms desde creado
+    antes = metricas_del_joiner()
+
+    for f in range(3):
+        procesar(Canal(), mensaje_resultado(fragmento=f))
+
+    assert [d - a for d, a in zip(metricas_del_joiner(), antes)] == [
+        1, 0, pytest.approx(0.04), 1, pytest.approx(4.05)]
+
+
+def test_un_job_que_se_intenta_cerrar_dos_veces_observa_su_tiempo_una_sola_vez(redis):
+    preparar_archivo_terminado(redis)
+    procesar = manejador(redis, ahora_ms=reloj(1761055395000, 1761055395040, 1761055395050, 1761055399000))
+    antes = metricas_del_joiner()
+
+    for f in (0, 1, 2, 2):  # el último es un duplicado que llega después del cierre
+        procesar(Canal(), mensaje_resultado(fragmento=f))
+
+    assert metricas_del_joiner()[3] - antes[3] == 1
+
+
+def test_un_fragmento_que_no_une_nada_no_cuenta_y_uno_que_falta_cuenta_como_error(redis):
+    preparar_archivo_terminado(redis)
+    redis.delete("job:j1:frag:0:1:1")
+    procesar = manejador(redis)
+    antes = metricas_del_joiner()
+
+    procesar(Canal(), mensaje_resultado(fragmento=0))
+    procesar(Canal(), mensaje_resultado(fragmento=1))
+    with pytest.raises(joiner.FragmentoFaltante):
+        procesar(Canal(), mensaje_resultado(fragmento=2))
+
+    assert [d - a for d, a in zip(metricas_del_joiner(), antes)] == [0, 1, 0, 0, 0]

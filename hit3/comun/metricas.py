@@ -41,6 +41,11 @@ def trabajo(servicio, operacion, segundos):
     TIEMPO_TAREA.labels(servicio, operacion).observe(segundos)
 
 
+def fallo(servicio, operacion):
+    """Una unidad de trabajo que terminó mal."""
+    TAREAS.labels(servicio, operacion, "error").inc()
+
+
 @contextlib.contextmanager
 def fallos(servicio, operacion):
     """Cuenta `resultado="error"` si el bloque lanza una excepción que va a la DLQ, y la deja seguir."""
@@ -49,5 +54,5 @@ def fallos(servicio, operacion):
     except REENCOLAN:
         raise
     except Exception:
-        TAREAS.labels(servicio, operacion, "error").inc()
+        fallo(servicio, operacion)
         raise
