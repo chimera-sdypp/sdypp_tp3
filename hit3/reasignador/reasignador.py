@@ -4,9 +4,11 @@ a `failed` (contrato §9 y §10)."""
 
 import json
 import logging
+import signal
+import sys
 import time
 
-from comun import claves, colas
+from comun import claves, colas, conexion, registro, salud
 
 TAREA = "tarea"  # el origen de lo que vino de una sobel.tareas.<imagen>; los otros son sobel.split y sobel.joiner
 CAMPOS_DE_TAREA = ("archivo", "fragmento", "paso", "operaciones", "intento")  # los del §9 que usa el reasignador
@@ -167,3 +169,31 @@ def manejador(redis, reintentos_max, ahora_ms=ahora_en_ms, log=logging.getLogger
             log.warning("job %s: falló en el %s (%s), queda en %s", job_id, servicio, motivo, quedo or "nada: venció")
 
     return procesar
+
+
+def main():
+    log, _ = registro.configurar("reasignador")
+
+    def apagar(senal, _frame):
+        # Como en el split, el worker y el joiner: sin handler, como PID 1 del contenedor ignoraría el SIGTERM. El
+        # mensaje en curso queda sin ack y RabbitMQ lo reentrega: a lo sumo queda una tarea duplicada, que el worker
+        # soporta (contrato §9, punto 4), o un contador informativo de más.
+        log.info("%s: el reasignador termina; si había un mensaje en curso, RabbitMQ lo reentrega",
+                 signal.Signals(senal).name)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, apagar)
+    reintentos_max = conexion.entero_de_entorno("SOBEL_REINTENTOS_MAX", 3, 0)
+    puerto = conexion.entero_de_entorno("SOBEL_PUERTO", 8080, 1)
+    redis = conexion.cliente_redis()
+    # Antes de conectarse: mientras espera con backoff, la probe ve `caido` en vez de no tener respuesta.
+    salud.servir("reasignador", puerto, conexion.estado, redis=redis)
+    log.info("reasignador: /health en el puerto %d", puerto)
+    conexion.con_backoff(redis.ping, "redis", log=log)
+    log.info("reasignador consumiendo %s, con %d reintentos por tarea", colas.DLQ, reintentos_max)
+    conexion.consumir(colas.DLQ, manejador(redis, reintentos_max, log=log), al_conectar=colas.declarar,
+                      cliente_redis=redis, con_propiedades=True, log=log)
+
+
+if __name__ == "__main__":
+    main()
