@@ -87,6 +87,34 @@ def test_el_ultimo_paso_publica_el_resultado_en_el_fanout(redis):
         "job_id": "j1", "archivo": 0, "fragmento": 2, "worker": "w1", "ms": 412, "intento": 2})]
 
 
+OTRA = "ghcr.io/chimera-sdypp/sobel-worker:1.1.0"
+
+
+def test_un_paso_intermedio_manda_la_tarea_a_la_cola_de_la_imagen_del_paso_siguiente(redis):
+    operaciones = [{"operacion": "grises", "imagen": IMAGEN}, {"operacion": "grises", "imagen": OTRA}]
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=operaciones, intento=3)
+    canal = CanalQuePublica()
+
+    manejador(redis, ahora_ms=reloj(1761055391100, 1761055391300, 1761055391712, 1761055391720))(canal, cuerpo)
+
+    cola = f"sobel.tareas.{OTRA}"
+    assert canal.eventos == [("declarar", cola), ("publicar", "", cola, {
+        "job_id": "j1", "archivo": 0, "fragmento": 2, "paso": 1, "operaciones": operaciones,
+        "intento": 1, "encolado": 1761055391720})]
+
+
+def test_el_ultimo_paso_de_una_cadena_publica_el_resultado_con_el_intento_de_esa_tarea(redis):
+    operaciones = [{"operacion": "grises", "imagen": IMAGEN}, {"operacion": "grises", "imagen": OTRA}]
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=operaciones, paso=1, intento=2)
+    canal = CanalQuePublica()
+
+    manejador(redis)(canal, cuerpo)
+
+    assert canal.eventos == [("publicar", "sobel.resultados", "", {
+        "job_id": "j1", "archivo": 0, "fragmento": 2, "worker": "w1", "ms": 412, "intento": 2})]
+    assert redis.exists("job:j1:frag:0:2:2") and not redis.exists("job:j1:frag:0:2:1")
+
+
 def test_suma_sus_tiempos_a_los_del_job_y_se_anota_entre_sus_workers(redis):
     redis.hset("job:j1", mapping={"cola_ms": 50, "cola_n": 2, "proc_ms": 1000, "proc_n": 2})
     redis.sadd("job:j1:workers", "w0")
@@ -177,3 +205,18 @@ def test_un_job_en_grises_partido_y_procesado_da_la_imagen_entera_en_grises(redi
     for archivo, original in enumerate(originales):
         esperado = np.asarray(Image.fromarray(original).convert("L"))
         np.testing.assert_array_equal(unir(redis, "j1", archivo, paso=1), esperado)
+
+
+@pytest.mark.parametrize("imagenes", [[IMAGEN, OTRA], [OTRA, IMAGEN, OTRA]], ids=["2_pasos", "3_pasos"])
+def test_una_cadena_de_varios_pasos_llega_entera_a_los_resultados(redis, imagenes):
+    original = imagen_rgb(10, 6, semilla=3)
+    operaciones = [{"operacion": "grises", "imagen": imagen} for imagen in imagenes]
+    cargar_job(redis, "j1", [png(original)], operaciones)
+
+    resultados = procesar_job(redis, "j1", partes=4)
+
+    assert sorted(r["fragmento"] for r in resultados) == [0, 1, 2, 3]
+    np.testing.assert_array_equal(unir(redis, "j1", 0, paso=len(imagenes)),
+                                  np.asarray(Image.fromarray(original).convert("L")))
+    # Sólo quedan los del último paso: cada paso borró su entrada.
+    assert sorted(redis.keys("job:j1:frag:*")) == [f"job:j1:frag:0:{f}:{len(imagenes)}".encode() for f in range(4)]
