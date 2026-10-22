@@ -1,5 +1,5 @@
 # Trabajo Práctico N° 3 — Sistemas Distribuidos y Paralelos
-## Informe Individual: Mateo Nomico (Rol: Procesamiento y Mensajería)
+## Grupo Cerberus: Salvador Baez, Mateo Nomico y Tomás Resnik
 ### Teorema CAP y patrones de mensajería del Hit #3
 
 ---
@@ -176,7 +176,7 @@ RabbitMQ con colas quorum y Redis replicado hacen elecciones opuestas: el primer
    * **Specs:** cada servicio arrancó con una spec discutida pregunta por pregunta antes de escribir código (el contrato de `hit3/contrato.md` salió de ahí).
    * **Tests primero:** cada comportamiento se escribió primero como un test en rojo. Cuando un test pasó sin haber fallado nunca, se rompió el código a propósito para comprobar que lo detectaba.
    * **Revisión:** en cada ticket, dos subagentes revisaron por separado el cumplimiento de las reglas del grupo y el de la spec, y encontraron errores reales (un contador que podía quedar en −1, un `TypeError` en el cierre del joiner).
-   * **Este informe:** la estructura y la redacción, a partir de decisiones tomadas por mí.
+   * **Este informe:** la estructura y la redacción, a partir de decisiones tomadas por el grupo.
 3. **Lo que verificamos a mano o contra RabbitMQ 4 real** (y no tomamos de la IA ni de la documentación): que con `x-delivery-limit: 0` la primera caída del consumidor manda el mensaje a la DLQ; que un `nack` con reencolado no cuenta para el límite de entregas; y que `x-first-death-queue` llega como texto. Las tres cosas están ahora en el contrato.
 4. **Supervisión:** todo el código pasó por los tests del CI y por la revisión del grupo antes de mergearse a `dev`. La arquitectura y las decisiones de diseño son del grupo.
 
@@ -192,4 +192,4 @@ RabbitMQ con colas quorum y Redis replicado hacen elecciones opuestas: el primer
 * Redis. *Replication*, *WAIT*, *Persistence*. https://redis.io/docs
 
 ---
-*Mateo Nomico — Grupo Cerberus (SDyPP 2026)*
+*Salvador Baez, Mateo Nomico y Tomás Resnik — Grupo Cerberus (SDyPP 2026)*
