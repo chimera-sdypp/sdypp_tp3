@@ -1,4 +1,4 @@
-"""Píxeles de un archivo: lectura en RGB, partición en fragmentos y codificación a PNG."""
+"""Píxeles de un archivo: lectura, partición en fragmentos con su geometría, unión y codificación a PNG."""
 
 import io
 
@@ -52,7 +52,7 @@ def dividir(matriz, partes, filas_de_borde):
     return franjas
 
 
-def geometria(fragmentos):
+def hash_de_geometria(fragmentos):
     """Lo que devuelve `dividir` → el hash `job:<id>:geometria:<a>` (contrato §10).
 
     `total` y, por fragmento, `"<filas_extra_arriba>,<filas>"`: lo que el joiner necesita para recortar los bordes.
@@ -64,18 +64,22 @@ def geometria(fragmentos):
 
 
 def leer_geometria(hash_geometria):
-    """El hash de `geometria` (tal como vuelve de Redis) → [(filas_extra_arriba, filas)] en el orden de los fragmentos."""
-    texto = {_texto(clave): _texto(valor) for clave, valor in hash_geometria.items()}
+    """El hash de la geometría, tal como vuelve de Redis → [(filas_extra_arriba, filas)] en el orden de los fragmentos.
+
+    Lanza ValueError si está vacío: venció, o el split no llegó a escribirlo.
+    """
+    if not hash_geometria:
+        raise ValueError("no hay geometría del archivo")
+    texto = {clave.decode(): valor.decode() for clave, valor in hash_geometria.items()}
     return [tuple(map(int, texto[str(indice)].split(","))) for indice in range(int(texto["total"]))]
 
 
-def _texto(valor):
-    return valor.decode() if isinstance(valor, bytes) else str(valor)
+def unir(franjas, geometria):
+    """Recorta los bordes de cada franja según su (filas_extra_arriba, filas) y las apila en orden (contrato §10).
 
-
-def unir(franjas, geometria_de_franjas):
-    """Recorta los bordes de cada franja según su (filas_extra_arriba, filas) y las apila en orden."""
-    return np.vstack([franja[extra:extra + filas] for franja, (extra, filas) in zip(franjas, geometria_de_franjas)])
+    Si faltan franjas o sobran, ValueError: unir de menos daría una imagen incompleta sin aviso.
+    """
+    return np.vstack([franja[extra:extra + filas] for franja, (extra, filas) in zip(franjas, geometria, strict=True)])
 
 
 def a_png(matriz):

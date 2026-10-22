@@ -89,7 +89,7 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
                                "operaciones": operaciones, "intento": 1})
             clave_geometria = claves.geometria(job_id, archivo)
             with redis.pipeline() as transaccion:  # sin TTL quedaría para siempre si se corta entre los dos
-                transaccion.hset(clave_geometria, mapping=pixeles.geometria(fragmentos))
+                transaccion.hset(clave_geometria, mapping=pixeles.hash_de_geometria(fragmentos))
                 transaccion.expire(clave_geometria, ttl)
                 transaccion.execute()
 
