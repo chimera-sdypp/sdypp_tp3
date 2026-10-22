@@ -126,7 +126,7 @@ jobs:
         run: PYTHON=python bash tests/tolerancia.sh
 
   hit3:
-    # También corre el worker, pero el nombre es un check obligatorio de dev: cambiarlo traba los PR.
+    # También corre el worker y el joiner, pero el nombre es un check obligatorio de dev: cambiarlo traba los PR.
     name: Hit 3 — comun y split
     runs-on: ubuntu-latest
     defaults:
@@ -138,13 +138,15 @@ jobs:
         with:
           python-version: "3.14"
       - name: Instalar dependencias
-        run: pip install -r comun/requirements-dev.txt -r split/requirements-dev.txt -r worker/requirements-dev.txt
+        run: pip install -r comun/requirements-dev.txt -r split/requirements-dev.txt -r worker/requirements-dev.txt -r joiner/requirements-dev.txt
       - name: Tests de comun
         run: python -m pytest -v comun
       - name: Tests del split
         run: python -m pytest -v split
       - name: Tests del worker
         run: python -m pytest -v worker
+      - name: Tests del joiner
+        run: python -m pytest -v joiner
 
   # Sólo al mergear a dev o a main, o con un tag v*: los PR prueban pero no publican.
   servicios:
