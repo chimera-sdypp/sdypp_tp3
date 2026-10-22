@@ -30,3 +30,16 @@ def workers(job_id):
 def worker(nombre):
     """El anuncio de un worker activo; `nombre` es su hostname."""
     return f"worker:{nombre}"
+
+
+def listos(job_id, archivo):
+    """Los fragmentos completos del archivo que ya contó el joiner."""
+    return f"job:{job_id}:listos:{archivo}"
+
+
+def unidos(job_id):
+    return f"job:{job_id}:unidos"
+
+
+def resultado(job_id, archivo):
+    return f"job:{job_id}:resultado:{archivo}"

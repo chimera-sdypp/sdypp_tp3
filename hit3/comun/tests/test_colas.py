@@ -46,6 +46,22 @@ def test_declarar_ata_la_dlq_al_dlx_y_el_joiner_al_fanout_de_resultados():
                               ("sobel.joiner", "sobel.resultados", "")}
 
 
+def test_declarar_da_dead_letter_a_la_dlq_al_split_y_al_joiner_pero_no_a_las_dlq(monkeypatch):
+    monkeypatch.setenv("SOBEL_LIMITE_ENTREGAS", "5")
+    canal = CanalQueRegistra()
+
+    colas.declarar(canal)
+
+    for nombre in ("sobel.split", "sobel.joiner"):
+        assert canal.colas[nombre]["arguments"] == {
+            "x-queue-type": "quorum",
+            "x-dead-letter-exchange": "sobel.dlx",
+            "x-dead-letter-routing-key": "sobel.dlq",
+            "x-delivery-limit": 5,
+        }, nombre
+    for nombre in ("sobel.dlq", "sobel.dlq.agotados"):
+        assert canal.colas[nombre]["arguments"] == {"x-queue-type": "quorum"}, nombre
+
 
 def test_declarar_tareas_crea_la_cola_de_la_imagen_con_dead_letter_a_la_dlq(monkeypatch):
     monkeypatch.delenv("SOBEL_LIMITE_ENTREGAS", raising=False)

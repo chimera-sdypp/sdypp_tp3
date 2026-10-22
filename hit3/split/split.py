@@ -23,7 +23,8 @@ def claves_de_entrada(job_id, archivos):
 
 def fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora):
     """Deja el job en `failed` con error ARCHIVO_INVALIDO y `terminado`, lo anota en `terminados` (los últimos 1000)
-    y borra las entradas. Todo junto: si se cortara en el medio, el redelivery vería `failed` y no completaría el resto."""
+    y borra las entradas. Todo junto: si se cortara en el medio, el redelivery vería `failed` y no completaría el
+    resto."""
     clave_job = claves.job(job_id)
     error = {"tipo": "ARCHIVO_INVALIDO", "mensaje": mensaje}
     total_ms = ahora - int(redis.hget(clave_job, "creado"))
@@ -62,7 +63,7 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
         clave_job = claves.job(job_id)
         estado = redis.hget(clave_job, "estado")
         if estado is None:
-            # Ni reintentarlo ni la DLQ lo arreglan: sobel.split no tiene DLX y el reasignador maneja tareas.
+            # Ni reintentarlo ni la DLQ lo arreglan: el job ya no está, y el reasignador no tendría qué marcar.
             log.warning("job %s no existe (venció o el backend no lo terminó de crear), se descarta", job_id)
             return
         if estado != b"queued":
@@ -83,15 +84,13 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
                 log.warning("job %s: %s, queda en failed", job_id, mensaje)
                 return
             fragmentos = pixeles.dividir(matriz, partes, filas_de_borde)
-            geometria = {"total": len(fragmentos)}
-            for f, (franja, extra, filas) in enumerate(fragmentos):
+            for f, (franja, _, _) in enumerate(fragmentos):
                 redis.set(claves.fragmento(job_id, archivo, f, 0), pixeles.a_png(franja), ex=ttl)
-                geometria[f] = f"{extra},{filas}"
                 tareas.append({"job_id": job_id, "archivo": archivo, "fragmento": f, "paso": 0,
                                "operaciones": operaciones, "intento": 1})
             clave_geometria = claves.geometria(job_id, archivo)
             with redis.pipeline() as transaccion:  # sin TTL quedaría para siempre si se corta entre los dos
-                transaccion.hset(clave_geometria, mapping=geometria)
+                transaccion.hset(clave_geometria, mapping=pixeles.hash_de_geometria(fragmentos))
                 transaccion.expire(clave_geometria, ttl)
                 transaccion.execute()
 

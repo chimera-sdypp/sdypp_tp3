@@ -98,7 +98,7 @@ Respuesta inmediata, `202` con `Location: /jobs/<id>`. Todas las respuestas usan
 | `tiempos_s.split` | Lo que tardó el split en partir todos los archivos |
 | `tiempos_s.cola` | Espera **promedio** de un fragmento en la cola, por paso |
 | `tiempos_s.procesamiento` | Lo que tarda **en promedio** un worker en procesar un fragmento, por paso |
-| `tiempos_s.join` | Lo que tardó el joiner en unir todos los archivos (`null` hasta `done`) |
+| `tiempos_s.join` | La suma de lo que tardó el joiner en unir cada archivo (`null` hasta que une el primero) |
 | `tiempos_s.total` | De `creado` a `terminado` |
 | `workers` | Los workers que procesaron al menos un fragmento |
 | `reintentos` | Cuántas veces el reasignador volvió a encolar un fragmento sacado de la DLQ |
@@ -110,7 +110,7 @@ Respuesta inmediata, `202` con `Location: /jobs/<id>`. Todas las respuestas usan
 | `queued` | Aceptado, esperando al split | backend |
 | `processing` | Partido; los fragmentos están en los workers | split (o el backend al reprocesar la DLQ) |
 | `done` | Todos los archivos unidos; los resultados se pueden bajar | joiner |
-| `failed` | Error que no se arregla reintentando: un archivo que pasó la validación pero no se puede decodificar | split |
+| `failed` | Error que no se arregla reintentando: un archivo que pasó la validación pero no se puede decodificar, o un job del split o un fragmento completo del joiner que llegó a la DLQ (§9) | split, reasignador |
 | `dlq` | Al menos un fragmento agotó los reintentos. Un admin lo puede reprocesar y vuelve a `processing` | reasignador |
 
 `done` y `failed` son finales: nadie los cambia después.
@@ -227,25 +227,29 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 
 | Nombre | Tipo | Quién publica → quién consume |
 |---|---|---|
-| `sobel.split` | cola quorum | backend → split |
+| `sobel.split` | cola quorum, con DLX `sobel.dlx`, routing key `sobel.dlq` y `x-delivery-limit` | backend → split |
 | `sobel.tareas.<imagen>` | cola quorum, una por imagen de worker, con DLX `sobel.dlx`, routing key `sobel.dlq` y `x-delivery-limit` | split, worker y reasignador → workers de esa imagen |
 | `sobel.dlx` | exchange direct | lo usa RabbitMQ al descartar un mensaje |
 | `sobel.dlq` | cola quorum, atada a `sobel.dlx` | RabbitMQ → reasignador |
 | `sobel.dlq.agotados` | cola quorum | reasignador → backend (al reprocesar) |
 | `sobel.resultados` | exchange fanout | worker (último paso) → joiner y frontend |
-| `sobel.joiner` | cola quorum, atada a `sobel.resultados` | → joiner (compiten las réplicas) |
+| `sobel.joiner` | cola quorum, atada a `sobel.resultados`, con DLX `sobel.dlx`, routing key `sobel.dlq` y `x-delivery-limit` | → joiner (compiten las réplicas) |
 | (sin nombre) | cola exclusiva, atada a `sobel.resultados` (`colas.declarar_exclusiva`) | → frontend; una por réplica, se borra sola |
 
 - `<imagen>` es la referencia completa de la imagen (`sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0`).
 - Todos declaran con `hit3/comun/colas.py` y el mismo `SOBEL_LIMITE_ENTREGAS`: si una cola ya existe con otros
   argumentos, RabbitMQ responde `PRECONDITION_FAILED`, y para cambiarlos hay que borrarla. RabbitMQ cuenta
-  *reentregas*: con 3, un mensaje se entrega hasta 4 veces antes de ir a la DLQ.
+  *reentregas* de un consumidor que se cae con el mensaje en la mano: con 3, a la 4.ª caída el mensaje va a la DLQ.
+  Un `nack` que lo reencola (cuando se cae Redis) no suma.
 - Quien publica a una `sobel.tareas.<imagen>` la declara antes. La declaración es idempotente y evita que un mensaje
   se pierda si todavía no arrancó ningún worker de esa imagen.
 - Mensajes JSON (`content_type: application/json`) y persistentes (`delivery_mode: 2`). Los píxeles **no viajan
   por RabbitMQ**: van en Redis y el mensaje lleva la clave.
-- **A la DLQ** llega un fragmento cuando el worker hace `nack` sin reencolar (error al procesarlo, timeout) o
-  cuando el worker muere con el mensaje en la mano más veces que `x-delivery-limit` (crash, OOM).
+- **A la DLQ** llega un mensaje cuando su consumidor hace `nack` sin reencolar (error al procesarlo, timeout del
+  worker) o cuando muere con el mensaje en la mano más veces que `x-delivery-limit` (crash, OOM). Puede ser una
+  tarea, un job del split o un fragmento completo del joiner. El reasignador los distingue por el header
+  `x-first-death-queue`: una tarea (de una `sobel.tareas.<imagen>`) la reintenta; un job o un fragmento completo no
+  tiene reintento que lo arregle, así que el reasignador pasa el job a `failed` (§10) y lo saca de la DLQ.
 
 **`sobel.split`**: `{"job_id": "3f6c2a9e-…"}`. El resto lo lee de `job:<id>`.
 
@@ -291,13 +295,15 @@ dos primeras no se arreglan reintentando: gastan los reintentos y el job termina
 
 `ms` es lo que tardó la operación del último paso. Si una tarea vuelve después de escribir la salida (reentrega, punto
 4), el worker manda el resultado con `ms: 0` y su propio nombre en `worker`. Puede ser la primera vez que llega o un
-duplicado: el joiner lo ignora si el `SADD` sobre `listos` devuelve 0.
+duplicado: el joiner no cuenta un duplicado, pero revisa igual si hay algo para unir o cerrar (§10), porque el
+original pudo haberse contado justo antes de una caída del joiner.
 
 ## 10. Redis
 
 Todas las claves de un job empiezan con `job:<id>` y vencen a las 24 h (`SOBEL_TTL`). Se arman con
 `hit3/comun/claves.py`, como las colas con `colas.py`: una clave mal escrita no falla, sólo hace que un servicio no
-encuentre lo que escribió otro. El split y el worker ya lo usan; el backend y el frontend todavía las escriben a mano.
+encuentre lo que escribió otro. El split, el worker y el joiner ya lo usan; el backend y el frontend todavía las
+escriben a mano.
 
 | Clave | Tipo | Escribe → lee | Contenido |
 |---|---|---|---|
@@ -321,9 +327,13 @@ encuentre lo que escribió otro. El split y el worker ya lo usan; el backend y e
 - **split:** `estado=processing`, `fragmentos_total`, `t_split_ms`, la geometría y los fragmentos del paso 0. Si un
   archivo no se puede decodificar: `estado=failed`, `error`, `terminado` y la entrada en `terminados`.
 - **worker:** `cola_ms`, `cola_n`, `proc_ms`, `proc_n` (con `HINCRBY`) y `job:<id>:workers`.
-- **joiner:** `completos`, los resultados, y al final `estado=done`, `terminado`, `t_join_ms` y la entrada en `terminados`.
-  Borra los fragmentos del último paso después de unir.
+- **joiner:** `completos`, `t_join_ms` (la suma de lo que tardó cada unión), `listos`, `unidos` y los resultados, y
+  al final `estado=done`, `terminado` y la entrada en `terminados`. Borra los fragmentos del último paso después de
+  unir.
 - **reasignador:** `reintentos`. Cuando un fragmento agota los intentos: `en_dlq`, `estado=dlq`, `error`, `terminado` y la entrada en `terminados`.
+  Cuando le llega a la DLQ un job del split o un fragmento completo del joiner (§9), sin reintentar y si el job no
+  está ya en `done` ni en `failed` (§3): `estado=failed`, `error`, `terminado` y la entrada en `terminados`. No usa
+  `dlq` porque `/admin/dlq/reprocesar` sólo sabe reencolar tareas.
 
 **Bordes.** Sobel y blur necesitan los vecinos de cada píxel. El split le agrega a cada fragmento tantas filas extra
 arriba y abajo como operaciones de vecindad tenga la cadena (`sobel` y `blur` cuentan; `grises` no). Las dos son 3×3:
@@ -332,10 +342,25 @@ imagen y con redondeo al entero más cercano. El split anota en `geometria` cuá
 pertenecen. El worker procesa el fragmento entero, sin saber de bordes, y el joiner recorta. Así el resultado es
 idéntico al de aplicar la cadena a la imagen entera, como en el Hit 1.
 
-**Que el joiner una cada archivo una sola vez.** `SADD` del fragmento en `listos`; si devuelve 1 (es nuevo), suma 1 a
-`completos`. Cuando el tamaño llega a `total`,
-el que lo logra con `SADD` sobre `unidos` (devuelve 1) une el archivo. Si es el último archivo, pone `done`, `terminado`
-y `t_join_ms`, y agrega la entrada a `terminados`.
+**Que el joiner una cada archivo una sola vez.** Con cada fragmento completo que le llega por `sobel.joiner`, en este
+orden:
+
+1. **Contar.** En una transacción con `WATCH` sobre `listos:<a>` y `job:<id>`: si el fragmento no está en `listos`,
+   lo agrega y suma 1 a `completos`, juntos. Un duplicado no suma, pero sigue al paso 2. Si el job venció, no
+   escribe nada, hace `ack` y lo deja en el log: un `HINCRBY` lo recrearía sin vencimiento.
+2. **Unir**, si `listos` tiene `total` fragmentos y el archivo no está en `unidos`: lee los fragmentos del último
+   paso, los une recortando los bordes, escribe `resultado:<a>`, suma lo que tardó a `t_join_ms`, agrega el archivo
+   a `unidos` y recién entonces borra los fragmentos del último paso. Si falta alguno, es un estado que no debería
+   existir y va a la DLQ, salvo que el archivo ya esté en `unidos` (otra réplica lo unió y los borró en el medio).
+3. **Cerrar**, si `unidos` tiene todos los archivos: en una transacción con `WATCH` sobre `job:<id>`, si el estado
+   no es `done` ni `failed`, pone `estado=done` y `terminado` y agrega la entrada a `terminados`, todo junto.
+
+El orden hace segura la reentrega después de una caída en cualquier punto: hasta que el archivo entra en `unidos`,
+los fragmentos siguen ahí y otra pasada vuelve a unir, y el `WATCH` del cierre hace que el job pase a `done` y entre
+en `terminados` una sola vez, aunque lo intenten dos réplicas. Dos réplicas que ven el mismo archivo completo a la
+vez pueden unirlo las dos: escriben los mismos bytes, y `t_join_ms` cuenta esa unión dos veces (es raro y sólo
+afecta un tiempo informativo). Si el joiner se cae entre `unidos` y el borrado, los fragmentos del último paso
+quedan hasta que vencen.
 
 ## 11. Métricas
 
@@ -376,7 +401,7 @@ conexión está caída. Las conexiones a RabbitMQ y Redis se reintentan con back
 | `SOBEL_PUERTO` | todos | `8080` | Puerto HTTP |
 | `BACKEND_URL` | frontend | — | URL interna del backend (`http://backend:8080`), para validar el token de `/eventos` |
 | `SOBEL_TTL` | todos | `86400` | Segundos que viven las claves de un job |
-| `SOBEL_LIMITE_ENTREGAS` | todos | `3` | `x-delivery-limit` de las `sobel.tareas.<imagen>`. Igual en todos (§9) |
+| `SOBEL_LIMITE_ENTREGAS` | todos | `3` | `x-delivery-limit` de las `sobel.tareas.<imagen>`, `sobel.split` y `sobel.joiner`. Igual en todos, frontend incluido: todos declaran las colas (§9) |
 | `SOBEL_SECRETO` | backend | — | Firma de los JWT (Secret) |
 | `SOBEL_IMAGENES_PERMITIDAS` | backend | — | Imágenes de worker permitidas, separadas por coma |
 | `SOBEL_SERVICIOS` | backend | — | `nombre=url` separados por coma: la URL completa del `/health` de cada servicio que resume el público (`split=http://split:8080/health`). Sin `backend`, `redis`, `rabbitmq` ni `workers`, que los informa el backend |

@@ -1,4 +1,4 @@
-"""Píxeles de un archivo: lectura en RGB, partición en fragmentos y codificación a PNG."""
+"""Píxeles de un archivo: lectura, partición en fragmentos con su geometría, unión y codificación a PNG."""
 
 import io
 
@@ -50,6 +50,36 @@ def dividir(matriz, partes, filas_de_borde):
         arriba = max(desde - filas_de_borde, 0)
         franjas.append((matriz[arriba:min(hasta + filas_de_borde, alto)], int(desde - arriba), int(hasta - desde)))
     return franjas
+
+
+def hash_de_geometria(fragmentos):
+    """Lo que devuelve `dividir` → el hash `job:<id>:geometria:<a>` (contrato §10).
+
+    `total` y, por fragmento, `"<filas_extra_arriba>,<filas>"`: lo que el joiner necesita para recortar los bordes.
+    """
+    hash_geometria = {"total": len(fragmentos)}
+    for indice, (_, extra, filas) in enumerate(fragmentos):
+        hash_geometria[indice] = f"{extra},{filas}"
+    return hash_geometria
+
+
+def leer_geometria(hash_geometria):
+    """El hash de la geometría, tal como vuelve de Redis → [(filas_extra_arriba, filas)] en el orden de los fragmentos.
+
+    Lanza ValueError si está vacío: venció, o el split no llegó a escribirlo.
+    """
+    if not hash_geometria:
+        raise ValueError("no hay geometría del archivo")
+    texto = {clave.decode(): valor.decode() for clave, valor in hash_geometria.items()}
+    return [tuple(map(int, texto[str(indice)].split(","))) for indice in range(int(texto["total"]))]
+
+
+def unir(franjas, geometria):
+    """Recorta los bordes de cada franja según su (filas_extra_arriba, filas) y las apila en orden (contrato §10).
+
+    Si faltan franjas o sobran, ValueError: unir de menos daría una imagen incompleta sin aviso.
+    """
+    return np.vstack([franja[extra:extra + filas] for franja, (extra, filas) in zip(franjas, geometria, strict=True)])
 
 
 def a_png(matriz):

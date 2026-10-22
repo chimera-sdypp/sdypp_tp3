@@ -62,7 +62,9 @@ Las flechas entre servicios son colas de RabbitMQ; los píxeles y el estado de c
   las recorta: el resultado es idéntico al del Hit #1.
 - **Fallas.** Colas quorum con `x-delivery-limit`: un worker que muere o hace `nack` manda el fragmento a la DLQ. El
   reasignador lo vuelve a encolar con espera de 1, 2, 4, 8… s (tope 30 s) y, si agota los intentos, lo pasa a
-  `sobel.dlq.agotados` y el job queda en `dlq` hasta que un admin lo reprocese. Nunca reintenta sin límite.
+  `sobel.dlq.agotados` y el job queda en `dlq` hasta que un admin lo reprocese. Nunca reintenta sin límite. El split
+  y el joiner también mandan a la DLQ lo que no pueden procesar, pero eso no se arregla reintentando: el job pasa a
+  `failed`.
 - **Fanout de resultados.** `sobel.resultados` llega al joiner (una cola compartida: compiten sus réplicas) y al
   frontend (una cola exclusiva por réplica: cada una ve todos los resultados).
 - **Backend sin estado (R4).** La identidad viaja en cada pedido (JWT HS256 con rol) y el límite por usuario se cuenta
