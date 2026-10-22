@@ -305,6 +305,18 @@ def test_un_redelivery_de_una_tarea_ya_terminada_vuelve_a_mandar_el_paso_siguien
     assert redis.hgetall("job:j1") == antes and not redis.exists("job:j1:workers")
 
 
+def test_un_redelivery_del_ultimo_paso_vuelve_a_publicar_el_resultado_sin_sumar_tiempos(redis):
+    cuerpo = cargar_tarea(redis, imagen_rgb(4, 6), intento=2)
+    redis.rename("job:j1:frag:0:2:0", "job:j1:frag:0:2:1")
+    canal = CanalQuePublica()
+
+    manejador(redis, ahora_ms=reloj(1761055391100))(canal, cuerpo)
+
+    # ms 0: este worker no sabe cuánto tardó la vez que se procesó (contrato §9).
+    assert canal.eventos == [("publicar", "sobel.resultados", "", {
+        "job_id": "j1", "archivo": 0, "fragmento": 2, "worker": "w1", "ms": 0, "intento": 2})]
+    assert not redis.hexists("job:j1", "proc_n") and not redis.exists("job:j1:workers")
+
 def test_una_tarea_sin_entrada_ni_salida_avisa_y_no_hace_nada(redis, caplog):
     # Por ejemplo, el joiner ya unió el archivo y borró los fragmentos del último paso.
     cuerpo = cargar_tarea(redis, imagen_rgb(4, 6))
@@ -368,7 +380,7 @@ def test_una_operacion_que_pasa_el_timeout_se_corta_y_va_a_la_dlq_sin_publicar_n
     inicio = time.monotonic()
 
     with pytest.raises(worker.TiempoAgotado):
-        manejador(redis, operaciones={"grises": lenta}, timeout=0.2)(canal, cuerpo)
+        manejador(redis, funciones={"grises": lenta}, timeout=0.2)(canal, cuerpo)
 
     assert time.monotonic() - inicio < 2
     assert canal.eventos == [] and not redis.exists("job:j1:frag:0:2:1")

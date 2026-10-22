@@ -47,8 +47,10 @@ def tiempo_limite(segundos):
     try:
         yield
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, anterior)
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        finally:  # si vence justo acá, la tarea va a la DLQ, pero el handler se restaura igual
+            signal.signal(signal.SIGALRM, anterior)
 
 
 def mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms):
@@ -65,7 +67,7 @@ def mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms):
     return colas.RESULTADOS
 
 
-def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), operaciones=OPERACIONES, timeout=TIMEOUT_POR_DEFECTO,
+def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), funciones=OPERACIONES, timeout=TIMEOUT_POR_DEFECTO,
               ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.worker")):
     """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada tarea; lo que escribe vence en `ttl` s.
 
@@ -77,15 +79,18 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), operaciones=OPERACION
         tarea = json.loads(cuerpo)
         job_id, archivo, indice, paso = tarea["job_id"], tarea["archivo"], tarea["fragmento"], tarea["paso"]
         operacion = tarea["operaciones"][paso]["operacion"]
-        if not redis.exists(claves.job(job_id)):
+        clave_job = claves.job(job_id)
+        clave_entrada = claves.fragmento(job_id, archivo, indice, paso)
+        clave_salida = claves.fragmento(job_id, archivo, indice, paso + 1)
+        if not redis.exists(clave_job):
             # Venció (24 h) o nunca terminó de crearse: nadie lo va a consultar, y sumarle tiempos lo
             # recrearía sin vencimiento.
             log.warning("job %s no existe, se descarta el fragmento %d del archivo %d", job_id, indice, archivo)
             return
         if operacion not in ofrecidas:
             raise OperacionNoOfrecida(f"este worker no ofrece {operacion} (ofrece: {', '.join(ofrecidas)})")
-        datos = redis.get(claves.fragmento(job_id, archivo, indice, paso))
-        if datos is None and redis.exists(claves.fragmento(job_id, archivo, indice, paso + 1)):
+        datos = redis.get(clave_entrada)
+        if datos is None and redis.exists(clave_salida):
             # Redelivery de una tarea que ya terminó: se cortó entre el borrado de la entrada y el ack. La salida
             # está escrita; sólo falta mandarla. Sin sumar tiempos: ya se contaron (y no se sabe cuánto tardó).
             destino = mandar_adelante(canal, tarea, nombre, 0, ahora_ms)
@@ -100,13 +105,12 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), operaciones=OPERACION
         entrada = pixeles.leer(datos)
         inicio = ahora_ms()
         with tiempo_limite(timeout):  # sólo la operación: cortar una llamada a Redis o a RabbitMQ deja todo a medias
-            salida = operaciones[operacion](entrada)
+            salida = funciones[operacion](entrada)
         proc_ms = ahora_ms() - inicio
-        redis.set(claves.fragmento(job_id, archivo, indice, paso + 1), pixeles.a_png(salida), ex=ttl)
+        redis.set(clave_salida, pixeles.a_png(salida), ex=ttl)
         destino = mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms)
         log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s",
                  job_id, archivo, indice, operacion, proc_ms, destino)
-        clave_job = claves.job(job_id)
         with redis.pipeline() as transaccion:  # sumas y cantidades para los promedios de tiempos_s (contrato §3)
             transaccion.hincrby(clave_job, "cola_ms", recibida - tarea["encolado"])
             transaccion.hincrby(clave_job, "cola_n", 1)
@@ -116,25 +120,25 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), operaciones=OPERACION
             transaccion.expire(claves.workers(job_id), ttl)
             transaccion.execute()
         # Se borra acá y no después del ack porque `consumir` hace el ack al volver del callback.
-        redis.delete(claves.fragmento(job_id, archivo, indice, paso))
+        redis.delete(clave_entrada)
 
     return procesar
 
 
-def anunciar(redis, nombre, imagen, operaciones):
+def anunciar(redis, nombre, imagen, ofrecidas):
     """Anota al worker como activo por VIGENCIA_DEL_ANUNCIO s: el backend valida cada paso contra esto (contrato §2)."""
     with redis.pipeline() as transaccion:  # sin vencimiento figuraría activo para siempre si se corta entre los dos
         transaccion.hset(claves.worker(nombre), mapping={
-            "imagen": imagen, "operaciones": ",".join(operaciones), "host": nombre})
+            "imagen": imagen, "operaciones": ",".join(ofrecidas), "host": nombre})
         transaccion.expire(claves.worker(nombre), VIGENCIA_DEL_ANUNCIO)
         transaccion.execute()
 
 
-def anunciar_siempre(redis, nombre, imagen, operaciones, log):
+def anunciar_siempre(redis, nombre, imagen, ofrecidas, log):
     """Renueva el anuncio cada CADA_CUANTO_ANUNCIAR s, en su propio hilo: una tarea larga no lo frena."""
     while True:
         try:
-            anunciar(redis, nombre, imagen, operaciones)
+            anunciar(redis, nombre, imagen, ofrecidas)
         except conexion.ERRORES_DE_CONEXION as error:  # Redis caído: se reintenta en la próxima vuelta
             log.warning("no se pudo renovar el anuncio del worker (%s)", error)
         except Exception:
