@@ -228,6 +228,19 @@ def test_un_duplicado_despues_de_cerrar_el_job_no_cambia_nada(redis):
     assert redis.lrange("terminados", 0, -1) == [b"done 4050"]
 
 
+def test_un_job_en_dlq_que_termina_de_unirse_pasa_a_done_sin_el_error_de_dlq(redis):
+    # Otra copia de la tarea agotada (una reentrega) terminó bien: el job ya no tiene nada en la DLQ que lo trabe.
+    preparar_archivo_terminado(redis)
+    redis.hset("job:j1", mapping={"estado": "dlq", "error": json.dumps({"tipo": "REINTENTOS_AGOTADOS", "mensaje": "…"}),
+                                  "terminado": 1761055393000})
+    procesar = manejador(redis)
+
+    for f in range(3):
+        procesar(Canal(), mensaje_resultado(fragmento=f))
+
+    assert redis.hmget("job:j1", "estado", "terminado", "error") == [b"done", b"1761055395050", None]
+
+
 def test_un_job_failed_no_se_cierra(redis):
     preparar_archivo_terminado(redis)
     redis.hset("job:j1", "estado", "failed")

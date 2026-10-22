@@ -60,9 +60,9 @@ Las flechas entre servicios son colas de RabbitMQ; los píxeles y el estado de c
 - **Los píxeles van por Redis**, no por RabbitMQ: los mensajes llevan claves y quedan chicos.
 - **Fragmentos con filas de borde.** El split agrega una fila arriba y abajo por cada operación de vecindad y el joiner
   las recorta: el resultado es idéntico al del Hit #1.
-- **Fallas.** Colas quorum con `x-delivery-limit`: un worker que muere o hace `nack` manda el fragmento a la DLQ. El
-  reasignador lo vuelve a encolar con espera de 1, 2, 4, 8… s (tope 30 s) y, si agota los intentos, lo pasa a
-  `sobel.dlq.agotados` y el job queda en `dlq` hasta que un admin lo reprocese. Nunca reintenta sin límite. El split
+- **Fallas.** Colas quorum con `x-delivery-limit`: un worker que muere o hace `nack` manda la tarea a la DLQ. El
+  reasignador la vuelve a encolar enseguida y, si agota los reintentos, la pasa a `sobel.dlq.agotados` y el job
+  queda en `dlq` hasta que un admin lo reprocese. Nunca reintenta sin límite. El split
   y el joiner también mandan a la DLQ lo que no pueden procesar, pero eso no se arregla reintentando: el job pasa a
   `failed`.
 - **Fanout de resultados.** `sobel.resultados` llega al joiner (una cola compartida: compiten sus réplicas) y al

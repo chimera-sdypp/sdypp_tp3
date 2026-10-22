@@ -94,9 +94,10 @@ def conectar_redis(url=None, log=logging.getLogger("tp3.comun")):
     return cliente
 
 
-def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
+def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None, con_propiedades=False,
              conectar=None, dormir=time.sleep, log=logging.getLogger("tp3.comun")):
-    """Consume `cola` llamando a `callback(canal, cuerpo)` por mensaje.
+    """Consume `cola` llamando a `callback(canal, cuerpo)` por mensaje; con `con_propiedades`,
+    `callback(canal, cuerpo, propiedades)`, para leer los headers (el reasignador, contrato §9).
 
     Si el callback termina bien hace ack; si lanza una excepción, nack sin reencolar (va a la DLQ si la cola
     tiene DLX; la exclusiva del frontend no tiene, y RabbitMQ lo descarta).
@@ -110,7 +111,7 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None,
 
     def manejar(canal, metodo, propiedades, cuerpo):
         try:
-            callback(canal, cuerpo)
+            callback(canal, cuerpo, propiedades) if con_propiedades else callback(canal, cuerpo)
         except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as error:
             log.warning("se cayó redis procesando un mensaje de %s (%s), lo reencolo", consumida, error)
             canal.basic_nack(delivery_tag=metodo.delivery_tag, requeue=True)
