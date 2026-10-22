@@ -390,6 +390,29 @@ Cada servicio expone `GET /metrics` (formato Prometheus) en su puerto HTTP.
 | `sobel_pedidos_total` | counter | `ruta`, `codigo` | backend |
 | `sobel_frontend_navegadores` | gauge | — | frontend: navegadores mirando el avance de un job |
 
+Las cuatro métricas que comparten los servicios (`sobel_tareas_procesadas_total`, `sobel_tiempo_tarea_segundos`,
+`sobel_errores_total` y `sobel_tiempo_job_segundos`) se definen una sola vez, en `hit3/comun/metricas.py`; las del
+backend y el frontend, en cada uno. El split, el worker, el joiner y el reasignador sirven `/metrics` en el mismo
+servidor que `/health`, aunque RabbitMQ o Redis estén caídos.
+
+- En `sobel_tareas_procesadas_total` y `sobel_tiempo_tarea_segundos`, una "tarea" es cualquier unidad de trabajo de
+  un servicio, no sólo una tarea del worker: el split cuenta cada job partido (con el tiempo de partir todos sus
+  archivos), el worker cada tarea (`operacion` es la del paso, con el tiempo de la operación, el de `proc_ms`), el
+  joiner cada archivo unido (con el tiempo de la unión, el de `t_join_ms`) y el reasignador cada tarea que reasigna
+  o agota. `resultado="error"` cuando ese trabajo falla con una excepción (`consumir` hace `nack`: va a la DLQ,
+  salvo en el reasignador, cuya cola no tiene DLX), o cuando el split encuentra un archivo que no decodifica. No
+  cuentan: los descartes (job vencido, duplicado, tarea de un job terminado), las caídas de Redis o RabbitMQ, una
+  tarea que el worker no puede leer (no se sabe su operación; cuenta en `sobel_errores_total`) ni el job que el
+  reasignador pasa a `failed`.
+- `sobel_errores_total{tipo}`: en el split, el worker, el joiner y el reasignador, `REDIS_CAIDO` (se reencoló el
+  mensaje porque Redis no respondía) y, por cada `nack`, el nombre de la excepción en mayúsculas y separado por
+  guiones bajos (`TiempoAgotado` → `TIEMPO_AGOTADO`, `JSONDecodeError` → `JSON_DECODE_ERROR`); además,
+  `ARCHIVO_INVALIDO` (split) y `MENSAJE_ILEGIBLE` (reasignador). El backend y el frontend suman los suyos (en el
+  frontend, `REDIS_CAIDO` es que `/ofertas` no pudo leer Redis).
+- `sobel_tiempo_job_segundos` es `terminado − creado`, una vez por job, cuando el joiner lo pasa a `done`; los jobs
+  en `dlq` o `failed` no cuentan. Aparece en 0 en los otros servicios.
+- Buckets: tareas de 0,005 a 60 s y jobs de 0,1 a 600 s (los de `prometheus_client` llegan a 10 s).
+
 El plugin `rabbitmq_prometheus` (puerto 15692) da publicados, consumidos y en cola. Por defecto suma todas las colas;
 para verlas una por una se usa `/metrics/per-object`.
 
