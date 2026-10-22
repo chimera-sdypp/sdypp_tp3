@@ -9,8 +9,7 @@ import time
 from comun import claves, colas, conexion, pixeles, registro, salud
 
 
-# Suman una fila de borde por lado (contrato §10). Supone kernels 3×3: el de `blur` se fija en M3 y se
-# confirma con Tomás; si fuera más grande, haría falta más de una fila por `blur`.
+# Suman una fila de borde por lado (contrato §10): las dos son 3×3.
 OPERACIONES_DE_VECINDAD = {"sobel", "blur"}
 
 
