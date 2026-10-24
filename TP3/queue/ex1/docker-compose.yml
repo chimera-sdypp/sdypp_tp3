@@ -1,0 +1,50 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-ex1
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python consumer.py
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      QUEUE_NAME: task_queue
+      PROCESSING_TIME: "0.5"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python producer.py
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      QUEUE_NAME: task_queue
+      NUM_TASKS: "10"
+      DELAY_BETWEEN_TASKS: "0.1"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    profiles:
+      - producer

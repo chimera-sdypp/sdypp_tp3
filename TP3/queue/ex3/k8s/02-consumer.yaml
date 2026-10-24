@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ex3-consumer
+  labels:
+    app: ex3-consumer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ex3-consumer
+  template:
+    metadata:
+      labels:
+        app: ex3-consumer
+    spec:
+      containers:
+        - name: consumer
+          image: sdypp/ex3-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "consumer.py"]
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-ex3-service"
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_USER
+              value: "guest"
+            - name: RABBITMQ_PASS
+              value: "guest"
+            - name: QUEUE_NAME
+              value: "ex3_task_queue"
+            - name: DLX_EXCHANGE
+              value: "dlx"
+            - name: DLQ_NAME
+              value: "dead_letter_queue"
+            - name: PROCESSING_TIME
+              value: "0.5"
+            - name: CONSUMER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

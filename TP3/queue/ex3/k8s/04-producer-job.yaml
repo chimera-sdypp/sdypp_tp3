@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ex3-producer-job
+  labels:
+    app: ex3-producer
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: ex3-producer
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: producer
+          image: sdypp/ex3-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "producer.py"]
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-ex3-service"
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_USER
+              value: "guest"
+            - name: RABBITMQ_PASS
+              value: "guest"
+            - name: QUEUE_NAME
+              value: "ex3_task_queue"
+            - name: DLX_EXCHANGE
+              value: "dlx"
+            - name: DLQ_NAME
+              value: "dead_letter_queue"
+            - name: NUM_TASKS
+              value: "10"
+            - name: ERROR_EVERY
+              value: "3"
+            - name: DELAY_BETWEEN_TASKS
+              value: "0.1"

@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq-ex4
+  labels:
+    app: rabbitmq-ex4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq-ex4
+  template:
+    metadata:
+      labels:
+        app: rabbitmq-ex4
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3-management-alpine
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+          readinessProbe:
+            tcpSocket:
+              port: 5672
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 5672
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-ex4-service
+  labels:
+    app: rabbitmq-ex4
+spec:
+  selector:
+    app: rabbitmq-ex4
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: 5672
+    - name: management
+      port: 15672
+      targetPort: 15672

@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ex4-producer-job
+  labels:
+    app: ex4-producer
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: ex4-producer
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: producer
+          image: sdypp/ex4-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "producer.py"]
+          env:
+            - name: RABBITMQ_HOST
+              value: "rabbitmq-ex4-service"
+            - name: RABBITMQ_PORT
+              value: "5672"
+            - name: RABBITMQ_USER
+              value: "guest"
+            - name: RABBITMQ_PASS
+              value: "guest"
+            - name: QUEUE_NAME
+              value: "ex4_task_queue"
+            - name: DLX_EXCHANGE
+              value: "dlx"
+            - name: DLQ_NAME
+              value: "dead_letter_queue"
+            - name: NUM_TASKS
+              value: "10"
+            - name: FORCE_FAIL_EVERY
+              value: "5"
+            - name: DELAY_BETWEEN_TASKS
+              value: "0.1"

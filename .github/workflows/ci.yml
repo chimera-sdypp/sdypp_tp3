@@ -1,0 +1,222 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gitleaks:
+    name: Detección de secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Binario y no gitleaks-action, que en repos de organizaciones pide licencia.
+      - name: Escanear secrets con gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            | tar -xz gitleaks
+          ./gitleaks git --redact -v .
+
+  hit3-backend:
+    name: Hit 3 — backend (tests, integración con RabbitMQ y Redis, imagen)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit3/backend
+    # Sin healthcheck de rabbitmq-diagnostics: corre como root y, si llega antes que el broker,
+    # crea un .erlang.cookie de root y RabbitMQ muere (eacces). Se espera desde el runner.
+    services:
+      rabbitmq:
+        image: rabbitmq:4-management
+        ports: ["5672:5672"]
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+    env:
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/%2F
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Tests unitarios
+        run: python -m pytest -v
+      - name: Esperar a RabbitMQ
+        run: |
+          python -c "
+          import time, pika
+          for _ in range(60):
+              try:
+                  pika.BlockingConnection(pika.URLParameters('$RABBITMQ_URL')).close(); break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise SystemExit('RabbitMQ no arrancó')"
+      - name: Integración con RabbitMQ y Redis
+        run: python -m pytest -v -m integracion
+      - name: Construir la imagen
+        run: docker build -f Dockerfile -t sobel-backend:ci ..
+
+  hit3-frontend:
+    name: Hit 3 — frontend (tests, integración con RabbitMQ y Redis, imagen)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit3/frontend
+    services:
+      rabbitmq:
+        image: rabbitmq:4-management
+        ports: ["5672:5672"]
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+    env:
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/%2F
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Tests unitarios
+        run: python -m pytest -v
+      - name: Esperar a RabbitMQ
+        run: |
+          python -c "
+          import time, pika
+          for _ in range(60):
+              try:
+                  pika.BlockingConnection(pika.URLParameters('$RABBITMQ_URL')).close(); break
+              except Exception:
+                  time.sleep(2)
+          else:
+              raise SystemExit('RabbitMQ no arrancó')"
+      - name: Integración con RabbitMQ
+        run: python -m pytest -v -m integracion
+      - name: Construir la imagen
+        run: docker build -f Dockerfile -t sobel-frontend:ci ..
+
+  hit1:
+    name: Hit 1 — Sobel (tests, integración y tolerancia a fallos con Docker)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Compilar
+        run: python -m compileall -q *.py tests
+      - name: Tests unitarios y master + workers en hilos
+        run: python -m pytest -v
+      - name: Integración con Docker (3 workers)
+        run: PYTHON=python bash tests/integracion.sh
+      - name: Tolerancia a fallos con Docker (worker caído, colgado y docker kill)
+        run: PYTHON=python bash tests/tolerancia.sh
+
+  hit3:
+    # También corre el worker, el joiner y el reasignador, pero el nombre es un check obligatorio de dev: cambiarlo
+    # traba los PR.
+    name: Hit 3 — comun y split
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install -r comun/requirements-dev.txt -r split/requirements-dev.txt -r worker/requirements-dev.txt -r joiner/requirements-dev.txt -r reasignador/requirements-dev.txt
+      - name: Tests de comun
+        run: python -m pytest -v comun
+      - name: Tests del split
+        run: python -m pytest -v split
+      - name: Tests del worker
+        run: python -m pytest -v worker
+      - name: Tests del joiner
+        run: python -m pytest -v joiner
+      - name: Tests del reasignador
+        run: python -m pytest -v reasignador
+
+  hit0:
+    name: Hit 0 — Queue (Ejemplos 1, 2, 3 y 4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install pika pytest
+      - name: Tests unitarios de cada ejemplo
+        run: |
+          for ex in TP3/queue/ex1 TP3/queue/ex2 TP3/queue/ex3 TP3/queue/ex4; do
+            echo "--- Corriendo tests de $ex ---"
+            (cd "$ex" && python -m pytest -v tests)
+          done
+
+  # Sólo al mergear a dev o a main, o con un tag v*: los PR prueban pero no publican.
+  servicios:
+    name: Servicios con imagen
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: [gitleaks, hit0, hit1, hit3, hit3-backend, hit3-frontend]
+    runs-on: ubuntu-latest
+    outputs:
+      lista: ${{ steps.buscar.outputs.lista }}
+    steps:
+      - uses: actions/checkout@v4
+      # Cada carpeta de hit3/ con Dockerfile es un servicio: los que se agreguen se publican solos.
+      - id: buscar
+        run: echo "lista=$(ls hit3/*/Dockerfile | cut -d/ -f2 | jq -Rnc '[inputs]')" >> "$GITHUB_OUTPUT"
+
+  imagenes:
+    name: Imagen ${{ matrix.servicio }} a GHCR
+    needs: servicios
+    runs-on: ubuntu-latest
+    # El GITHUB_TOKEN vence al terminar el job: no hay credenciales del registry guardadas en el repo.
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        servicio: ${{ fromJSON(needs.servicios.outputs.lista) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # dev / main → :dev / :main; tag v1.0.0 → :1.0.0 (el que usan los manifiestos); siempre :sha-<commit>.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/sobel-${{ matrix.servicio }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: hit3
+          file: hit3/${{ matrix.servicio }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.servicio }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.servicio }}
+

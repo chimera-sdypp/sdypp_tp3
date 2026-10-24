@@ -1,0 +1,13 @@
+#!/bin/bash
+# Bootstrap del worker del Hit #3: Docker, las URLs de conexión desde Secret Manager y el worker.
+set -euo pipefail
+if ! command -v docker >/dev/null; then
+  apt-get update -q
+  apt-get install -y -q docker.io
+fi
+gcloud auth configure-docker "${registro}" --quiet
+secreto() { gcloud secrets versions access latest --secret="$1"; }
+docker rm -f worker 2>/dev/null || true
+docker run -d --name worker --restart unless-stopped --hostname "$(hostname)" \
+  -e RABBITMQ_URL="$(secreto sobel-rabbitmq-url)" -e REDIS_URL="$(secreto sobel-redis-url)" \
+  -e SOBEL_IMAGEN="${imagen}" -p 8080:8080 "${imagen}"

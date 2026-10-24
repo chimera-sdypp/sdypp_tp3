@@ -1,0 +1,81 @@
+# Secretos: nunca al repo. Van por GitHub Secrets o archivos montados en el host.
+.env
+.env.*
+!.env.example
+secretos/
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs y datos que genera la ejecución
+logs/
+*.log
+
+# Editores y sistema
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# De los ejemplos del Hit #0
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv
+env/
+ENV/
+env.bak/
+venv.bak/
+*.env
+*.env.*
+!*.env.example
+*.cert
+*.crt
+*.secrets
+.tox/
+.nox/
+*.swo
+*~
+Thumbs.db
+
+# Documents & Internal notes
+TP3-P2*
+*.docx
+CONTEXTO*
+contexto*
+
+# Test data & load test artifacts
+hit3/carga/datos/
+hit3/carga/resultados/
+
+
+# Terraform: el estado vive en el bucket remoto, nunca acá
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

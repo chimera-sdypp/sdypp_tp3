@@ -1,0 +1,4 @@
+# Copiar a terraform.tfvars (ignorado por git) y completar.
+proyecto     = "mi-proyecto"
+imagen       = "southamerica-east1-docker.pkg.dev/mi-proyecto/sobel/sobel-hit1:1.0.0"
+ip_permitida = "203.0.113.10/32" # curl -s ifconfig.me
