@@ -17,15 +17,14 @@ spec:
           image: sdypp/ex1-app:latest
           imagePullPolicy: IfNotPresent
           command: ["python", "producer.py"]
+          envFrom:
+            - secretRef:
+                name: rabbitmq-credenciales
           env:
             - name: RABBITMQ_HOST
               value: "rabbitmq-service"
             - name: RABBITMQ_PORT
               value: "5672"
-            - name: RABBITMQ_USER
-              value: "guest"
-            - name: RABBITMQ_PASS
-              value: "guest"
             - name: QUEUE_NAME
               value: "task_queue"
             - name: NUM_TASKS

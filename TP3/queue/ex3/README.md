@@ -49,6 +49,10 @@ flowchart LR
 
 ## 3. Instrucciones de Ejecución
 
+> **Credenciales:** el usuario y la contraseña de RabbitMQ salen de `TP3/queue/.env`, que no se versiona.
+> La primera vez: `cp ../.env.example ../.env` y cambiar la contraseña. En Kubernetes, el mismo archivo se carga
+> como Secret antes de aplicar los manifiestos: `kubectl create secret generic rabbitmq-credenciales --from-env-file=../.env`
+
 ### Opción A — Ejecución Automatizada Local (Recomendada)
 ```bash
 cd TP3/queue/ex3
@@ -75,7 +79,7 @@ cd TP3/queue/ex3
    docker compose logs dlq-consumer   # solo recibe #3 #6 #9
    ```
 
-4. **Ver la topología en el broker** (o en la UI http://localhost:15672, guest/guest):
+4. **Ver la topología en el broker** (o en la UI http://localhost:15672, con el usuario de `TP3/queue/.env`):
    ```bash
    docker compose exec rabbitmq rabbitmqctl list_queues name arguments messages
    ```
