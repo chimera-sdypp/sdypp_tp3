@@ -60,7 +60,7 @@ prometheus:
         memory: 1536Mi
 
     retention: "7d"
-    retentionSize: "5Gi"
+    retentionSize: "5GiB"
 
 # ------------------------------------------------------------------------------
 # 2. Grafana
@@ -87,7 +87,7 @@ grafana:
       memory: 128Mi
     limits:
       cpu: 500m
-      memory: 512Mi
+      memory: 1Gi  # con 512Mi, Grafana 13 arranca en ~450Mi y el dashboard con refresh de 5 s lo tira por OOM
 
   sidecar:
     dashboards:

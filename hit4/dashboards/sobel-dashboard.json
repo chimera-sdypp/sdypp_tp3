@@ -155,7 +155,7 @@
       },
       "targets": [
         {
-          "expr": "rabbitmq_queue_messages{queue=\"sobel.dlq.agotados\"} or vector(0)",
+          "expr": "sum(rabbitmq_queue_messages{queue=\"sobel.dlq.agotados\"}) or vector(0)",
           "refId": "A"
         }
       ],
@@ -205,7 +205,7 @@
       },
       "targets": [
         {
-          "expr": "rabbitmq_queue_messages{queue=~\"sobel.*\"} or max(sobel_tareas_en_cola) by (cola)",
+          "expr": "rabbitmq_queue_messages{queue=~\"sobel.*\"}",
           "legendFormat": "{{queue}}",
           "refId": "A"
         }
