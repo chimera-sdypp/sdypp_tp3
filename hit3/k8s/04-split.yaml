@@ -1,21 +1,37 @@
+# ==============================================================================
+# 04-split.yaml — Manifiesto de Kubernetes para el Servicio Split
+# Sistemas Distribuidos y Paralelos — Hit #3
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. SERVICE (Exposición de Red Interna)
+# ------------------------------------------------------------------------------
+# Proporciona un nombre DNS interno y estable ('split.sobel.svc.cluster.local')
+# para que Prometheus pueda raspar métricas en el puerto 8080 (/metrics).
 apiVersion: v1
 kind: Service
 metadata:
-  name: split
-  namespace: sobel
+  name: split                     # Nombre del servicio en Kubernetes
+  namespace: sobel                # Namespace donde se ejecuta el sistema Sobel
   labels:
     app.kubernetes.io/name: split
     app.kubernetes.io/component: image-splitter
-    sobel/apps: "true"
+    sobel/apps: "true"            # Etiqueta clave: el ServiceMonitor de Prometheus la usa para encontrarlo
 spec:
-  type: ClusterIP
+  type: ClusterIP                 # Solo accesible desde adentro del clúster (no expuesto a Internet)
   selector:
-    app.kubernetes.io/name: split
+    app.kubernetes.io/name: split # Conecta este Service con los Pods que tengan esta etiqueta
   ports:
     - name: http
-      port: 8080
-      targetPort: 8080
+      port: 8080                  # Puerto del Service
+      targetPort: 8080            # Puerto dentro del contenedor donde corre FastAPI (/health y /metrics)
+
 ---
+# ------------------------------------------------------------------------------
+# 2. DEPLOYMENT (Gestor de Pods Stateless)
+# ------------------------------------------------------------------------------
+# Administra el ciclo de vida del contenedor del Split (arranque, reinicio y réplicas).
+# Es un Deployment porque el Split no guarda estado en disco local (todo va a Redis).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -26,7 +42,7 @@ metadata:
     app.kubernetes.io/component: image-splitter
     sobel/apps: "true"
 spec:
-  replicas: 1
+  replicas: 1                     # Cantidad de copias del Split corriendo en paralelo
   selector:
     matchLabels:
       app.kubernetes.io/name: split
@@ -37,6 +53,8 @@ spec:
         app.kubernetes.io/component: image-splitter
         sobel/apps: "true"
     spec:
+      # --- Asignación a Nodos de Aplicación ---
+      # Corre únicamente en nodos etiquetados con sobel/apps: "true", separándolo de la infra (Rabbit/Redis)
       nodeSelector:
         sobel/apps: "true"
       tolerations:
@@ -44,50 +62,75 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+
+      # --- Autenticación para Imágenes Privadas (Requisito R1) ---
+      # Permite a Kubernetes autenticarse contra GitHub Packages (GHCR) para bajar la imagen
       imagePullSecrets:
         - name: ghcr-secret
+
       containers:
         - name: split
           image: ghcr.io/chimera-sdypp/sobel-split:1.0.0
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: IfNotPresent # Solo descarga la imagen si no está en la caché del nodo
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: 8080       # Puerto donde escucha el servidor web (/health y /metrics)
+
+          # --- Variables de Entorno y Secretos ---
           env:
+            # URL de conexión a RabbitMQ (leída del Secret 'sobel-secretos', sin claves en texto plano)
             - name: RABBITMQ_URL
               valueFrom:
                 secretKeyRef:
                   name: sobel-secretos
                   key: RABBITMQ_URL
+
+            # URL de conexión a Redis (leída del Secret 'sobel-secretos')
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:
                   name: sobel-secretos
                   key: REDIS_URL
+
+            # Puerto HTTP para el servidor de salud y métricas
             - name: SOBEL_PUERTO
               value: "8080"
-            # SOBEL_PARTES: 0 activa el particionado dinámico multivariable (tamaño, workers y colas)
+
+            # SOBEL_PARTES: 0 activa el cálculo dinámico multivariable (tamaño, workers y colas)
+            # Si se desea forzar un número fijo para pruebas específicas, se puede poner ej. "4"
             - name: SOBEL_PARTES
               value: "0"
+
+            # Cantidad máxima de reintentos antes de mandar a la DLQ si el split crashea con un mensaje
             - name: SOBEL_LIMITE_ENTREGAS
               value: "3"
+
+          # --- Límites y Solicitudes de Recursos (CPU y RAM) ---
           resources:
             requests:
-              cpu: 200m
-              memory: 256Mi
+              cpu: 200m                 # Mínimo garantizado: 0.2 CPU
+              memory: 256Mi             # Mínimo garantizado: 256 MiB de RAM
             limits:
-              cpu: 1000m
-              memory: 2Gi
+              cpu: 1000m                # Máximo permitido: 1 CPU entera
+              memory: 2Gi               # Máximo permitido: 2 GiB de RAM (necesario para descomprimir imágenes de 100 MB)
+
+          # --- Probes de Salud y Disponibilidad ---
+          # Readiness Probe: ¿El pod está listo para procesar tráfico?
+          # Si /health no responde 200 (ej: aún conectándose a Redis), no le manda mensajes.
           readinessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
+            initialDelaySeconds: 5      # Espera 5 segundos tras arrancar antes de consultar
+            periodSeconds: 5            # Vuelve a consultar cada 5 segundos
             timeoutSeconds: 3
+
+          # Liveness Probe: ¿El pod sigue vivo o se congeló?
+          # Si el socket TCP en el puerto 8080 no responde, Kubernetes reinicia el pod automáticamente.
           livenessProbe:
             tcpSocket:
               port: 8080
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            initialDelaySeconds: 10     # Espera 10 segundos antes de comenzar la vigilancia
+            periodSeconds: 10           # Comprueba cada 10 segundos
             timeoutSeconds: 3
+
