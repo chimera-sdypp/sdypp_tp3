@@ -378,3 +378,36 @@ def test_un_job_que_va_a_la_dlq_cuenta_como_error(redis):
         split.manejador(redis, partes=2)(CanalQuePublica(), b"no es json")
 
     assert diferencia(antes) == [0, 1, 0, 0]
+
+
+def test_calcular_partes_dinamicas_imagen_chica(redis):
+    # Imagen chica (< 0.5 MB): 1 o 2 partes
+    chica = np.zeros((100, 100, 3), dtype=np.uint8)
+    assert split.calcular_partes(chica, redis) == 1
+
+    algo_mayor = np.zeros((200, 200, 3), dtype=np.uint8)
+    assert split.calcular_partes(algo_mayor, redis) == 2
+
+
+def test_calcular_partes_dinamicas_segun_workers_y_dimensiones(redis):
+    # Sin workers activos en Redis: fallback a 2
+    mediana = np.zeros((1200, 1200, 3), dtype=np.uint8)  # ~4.1 MB
+    assert split.calcular_partes(mediana, redis) == 2
+
+    # Con 4 workers activos en Redis
+    for i in range(4):
+        redis.hset(f"worker:w{i}", "host", f"w{i}")
+    assert split.calcular_partes(mediana, redis) == 4
+
+
+def test_calcular_partes_dinamicas_imagen_gigante(redis):
+    # Imagen grande/gigante (> 40 MB)
+    gigante = np.zeros((5000, 3000, 3), dtype=np.uint8)  # ~43 MB
+    partes = split.calcular_partes(gigante, redis)
+    assert 16 <= partes <= 32
+
+
+def test_calcular_partes_fijas_override(redis):
+    matriz = np.zeros((5000, 3000, 3), dtype=np.uint8)
+    assert split.calcular_partes(matriz, redis, partes_fijas=4) == 4
+

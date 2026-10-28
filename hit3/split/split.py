@@ -54,7 +54,65 @@ def pasar_a_processing(redis, job_id, t_split_ms):
     redis.transaction(escribir, clave_job)
 
 
-def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split")):
+def calcular_partes(matriz, redis, archivos=1, canal=None, cola_tareas=None, partes_fijas=0):
+    """Calcula cuántas partes cortar evaluando:
+    1. Dimensiones de la imagen (alto, ancho, memoria en MB).
+    2. Workers activos en Redis (claves 'worker:*').
+    3. Cantidad de archivos en el job.
+    4. Mensajes pendientes en la cola de tareas (RabbitMQ).
+
+    Si `partes_fijas` es > 0, se respeta ese valor (ej. para tests unitarios).
+    """
+    if partes_fijas and partes_fijas > 0:
+        return partes_fijas
+
+    alto, ancho = matriz.shape[:2]
+    tamano_mb = matriz.nbytes / (1024 * 1024)
+
+    # 1. Contar workers activos en Redis
+    try:
+        workers_activos = len(list(redis.scan_iter(match="worker:*", count=100)))
+    except Exception:
+        workers_activos = 2
+    workers_activos = max(workers_activos, 1)
+
+    # 2. Mensajes en cola (si se dispone de canal para consultar)
+    mensajes_en_cola = 0
+    if canal is not None and cola_tareas is not None:
+        try:
+            estado_cola = canal.queue_declare(queue=cola_tareas, passive=True)
+            mensajes_en_cola = getattr(estado_cola.method, "message_count", 0)
+        except Exception:
+            mensajes_en_cola = 0
+
+    # 3. Heurística multivariable
+    # A. Imagen chica (< 0.5 MB o alto < 300 px): 1 o 2 partes
+    if tamano_mb < 0.5 or alto < 300:
+        return 1 if alto < 150 else 2
+
+    # B. Imagen mediana (0.5 MB a 8 MB): proporcional a los workers
+    if tamano_mb < 8.0:
+        base = max(workers_activos, 2)
+        if mensajes_en_cola > 30:
+            return min(base, 4)
+        return min(base, 8)
+
+    # C. Imagen grande (8 MB a 40 MB): franjas de ~300 px
+    if tamano_mb < 40.0:
+        partes_por_alto = max(alto // 300, 4)
+        base = max(workers_activos * 2, partes_por_alto)
+        if mensajes_en_cola > 50:
+            return min(base, 8)
+        return min(base, 16)
+
+    # D. Imagen gigante (40 MB a 100 MB): franjas delgadas para evitar OOM
+    partes_por_alto = max(alto // 250, 8)
+    factor_archivos = max(archivos, 1)
+    max_partes = max(32 // factor_archivos, 8)
+    return int(min(max(partes_por_alto, workers_activos * 2), max_partes))
+
+
+def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split")):
     """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada job; lo que escribe vence en `ttl` s."""
 
     def procesar(canal, cuerpo):
@@ -76,6 +134,7 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
             return
         operaciones = json.loads(redis.hget(clave_job, "operaciones"))
         filas_de_borde = sum(paso["operacion"] in OPERACIONES_DE_VECINDAD for paso in operaciones)
+        nombre_cola = f"{colas.PREFIJO_TAREAS}{operaciones[0]['imagen']}"
         tareas = []
         archivos = int(redis.hget(clave_job, "archivos"))
         for archivo in range(archivos):
@@ -89,7 +148,9 @@ def manejador(redis, partes, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, l
                 metricas.fallo("split", "split")
                 metricas.ERRORES.labels("split", "ARCHIVO_INVALIDO").inc()
                 return
-            fragmentos = pixeles.dividir(matriz, partes, filas_de_borde)
+            n_partes = calcular_partes(matriz, redis, archivos=archivos, canal=canal, cola_tareas=nombre_cola,
+                                       partes_fijas=partes)
+            fragmentos = pixeles.dividir(matriz, n_partes, filas_de_borde)
             for f, (franja, _, _) in enumerate(fragmentos):
                 redis.set(claves.fragmento(job_id, archivo, f, 0), pixeles.a_png(franja), ex=ttl)
                 tareas.append({"job_id": job_id, "archivo": archivo, "fragmento": f, "paso": 0,
@@ -126,7 +187,7 @@ def main():
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, apagar)
-    partes = conexion.entero_de_entorno("SOBEL_PARTES", 4, 1)
+    partes = conexion.entero_de_entorno("SOBEL_PARTES", 0, 0)
     ttl = conexion.entero_de_entorno("SOBEL_TTL", claves.TTL_POR_DEFECTO, 1)
     puerto = conexion.entero_de_entorno("SOBEL_PUERTO", 8080, 1)
     redis = conexion.cliente_redis()
@@ -134,7 +195,10 @@ def main():
     salud.servir("split", puerto, conexion.estado, redis=redis)
     log.info("split: /health en el puerto %d", puerto)
     conexion.con_backoff(redis.ping, "redis", log=log)
-    log.info("split consumiendo %s, %d partes por archivo", colas.SPLIT, partes)
+    if partes > 0:
+        log.info("split consumiendo %s, %d partes fijas por archivo", colas.SPLIT, partes)
+    else:
+        log.info("split consumiendo %s, partes calculadas dinámicamente", colas.SPLIT)
     conexion.consumir(colas.SPLIT, manejador(redis, partes, ttl, log=log), al_conectar=colas.declarar,
                       cliente_redis=redis, servicio="split", log=log)
 
