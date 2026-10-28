@@ -20,7 +20,7 @@ flowchart LR
         WN[VMs worker x N]
     end
     M <-->|"franjas, HTTP 8080, sólo desde la IP local"| WN
-    T[terraform apply / destroy] -.-> WN
+    T["terraform apply (cantidad N, después 0)"] -.-> WN
     AR[(Artifact Registry)] -.->|imagen, con la cuenta de servicio de la VM| WN
 ```
 
