@@ -1,22 +1,44 @@
+# ========================================================================================
+# MANIFIESTO KUBERNETES: FRONTEND WEB (SERVICE + DEPLOYMENT)
+# ========================================================================================
+# Este archivo define la interfaz de usuario web del sistema Sobel distribuido.
+#
+# MEJORA PARA LA DEFENSA:
+# El frontend ya NO tiene dependencia de RabbitMQ (se eliminó RABBITMQ_URL).
+# Lee el avance directamente de Redis, convirtiéndolo en un Deployment 100% Stateless:
+# - Puede escalar a N réplicas sin multiplicar tráfico fanout ni saturar colas.
+# - Si un pod se reinicia, el usuario no pierde el avance del job.
+# ========================================================================================
+
+# Versión de la API básica de Kubernetes para recursos como Pods y Services
 apiVersion: v1
+# Tipo de recurso: Service (un punto de acceso estable con balanceo de carga interno)
 kind: Service
 metadata:
+  # Nombre con el que otros pods del clúster pueden resolverlo por DNS (http://frontend:8080)
   name: frontend
+  # Namespace donde reside todo el sistema Sobel
   namespace: sobel
+  # Etiquetas para organización y selección
   labels:
     app.kubernetes.io/name: frontend
     app.kubernetes.io/component: web-ui
     sobel/apps: "true"
 spec:
+  # ClusterIP: solo accesible dentro de la red del clúster (el Ingress lo expone al exterior)
   type: ClusterIP
+  # Selector: dirige el tráfico a cualquier Pod que tenga esta etiqueta
   selector:
     app.kubernetes.io/name: frontend
   ports:
+    # Puerto expuesto por el Service y puerto de destino en el contenedor
     - name: http
       port: 8080
       targetPort: 8080
 ---
+# Versión de la API para controladores de aplicaciones como Deployments y StatefulSets
 apiVersion: apps/v1
+# Tipo de recurso: Deployment (gestiona réplicas de pods sin estado de forma declarativa)
 kind: Deployment
 metadata:
   name: frontend
@@ -26,10 +48,13 @@ metadata:
     app.kubernetes.io/component: web-ui
     sobel/apps: "true"
 spec:
+  # Cantidad deseada de réplicas de pods del frontend (al ser Stateless, puede incrementarse libremente)
   replicas: 1
+  # Selector para identificar los pods gestionados por este Deployment
   selector:
     matchLabels:
       app.kubernetes.io/name: frontend
+  # Plantilla para la creación de cada nuevo Pod del frontend
   template:
     metadata:
       labels:
@@ -37,46 +62,59 @@ spec:
         app.kubernetes.io/component: web-ui
         sobel/apps: "true"
     spec:
+      # nodeSelector: obliga a programar el pod en nodos dedicados a las aplicaciones de usuario
       nodeSelector:
         sobel/apps: "true"
+      # tolerations: permite que el pod sea asignado a nodos que tienen el taint 'sobel/apps=true'
       tolerations:
         - key: "sobel/apps"
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+      # Secreto de Kubernetes para descargar la imagen privada desde GitHub Container Registry (GHCR)
       imagePullSecrets:
         - name: ghcr-secret
       containers:
         - name: frontend
+          # Imagen Docker empaquetada con FastAPI, uvicorn y los archivos estáticos
           image: ghcr.io/chimera-sdypp/sobel-frontend:1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
+          # Variables de entorno inyectadas al contenedor:
           env:
+            # 1. Conexión a Redis: extraída del Secret 'sobel-secretos' para estado global y avance
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:
                   name: sobel-secretos
                   key: REDIS_URL
+            # 2. Puerto HTTP donde corre FastAPI/Uvicorn dentro del contenedor
             - name: SOBEL_PUERTO
               value: "8080"
+            # 3. URL interna para comunicarse con el microservicio Backend (validar tokens y jobs)
             - name: BACKEND_URL
               value: "http://backend:8080"
+            # NOTA DEFENSA: Se eliminó RABBITMQ_URL. El frontend ya no ata colas exclusivas.
           resources:
+            # Recursos garantizados por Kubernetes para planificar el pod en un nodo
             requests:
-              cpu: 100m
-              memory: 128Mi
+              cpu: 100m      # 0.1 núcleo de CPU
+              memory: 128Mi  # 128 Megabytes de RAM
+            # Límite máximo de consumo permitido antes de estrangular CPU o reiniciar por OOMKilled
             limits:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 500m      # 0.5 núcleos de CPU
+              memory: 512Mi  # 512 Megabytes de RAM
+          # Sonda de preparación (Readiness): verifica si el pod ya puede recibir tráfico de usuarios
           readinessProbe:
             httpGet:
               path: /health
               port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 3
+            initialDelaySeconds: 5  # Espera 5s tras iniciar antes del primer chequeo
+            periodSeconds: 5        # Chequea cada 5 segundos
+            timeoutSeconds: 3       # Falla si no responde en 3 segundos
+          # Sonda de vida (Liveness): si el socket TCP deja de responder, Kubernetes reinicia el pod
           livenessProbe:
             tcpSocket:
               port: 8080
