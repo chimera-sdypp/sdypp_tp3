@@ -210,6 +210,18 @@ async function escucharAvisos(mirado) {
 }
 
 function recibir(mirado, resultado) {
+  if (resultado.fragmento === undefined) {
+    if (resultado.completos !== undefined) mirado.completos = resultado.completos;
+    if (resultado.total !== undefined) mirado.total = resultado.total;
+    if (resultado.porcentaje !== undefined) $("avance").style.width = `${resultado.porcentaje}%`;
+    if (resultado.estado) {
+      const estado = $("estado");
+      estado.textContent = resultado.estado;
+      estado.className = `estado ${resultado.estado}`;
+    }
+    dibujar(mirado);
+    return;
+  }
   const clave = `${resultado.archivo}:${resultado.fragmento}`;
   if (mirado.vistos.has(clave)) return; // una reentrega repite el aviso
   mirado.vistos.set(clave, resultado.worker);

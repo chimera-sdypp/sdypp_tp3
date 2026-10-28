@@ -23,10 +23,11 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, Gauge, generate_latest
 
-from comun import colas, conexion, metricas, registro
+from comun import claves, colas, conexion, metricas, registro
 
 ESTATICO = Path(__file__).parent / "estatico"
 LATIDO = 15  # segundos entre comentarios SSE: sin tráfico, el ingress corta la conexión
+INTERVALO_REDIS = 0.5  # intervalo en segundos para sondear avance en Redis
 EN_ESPERA = 1000  # resultados que se guardan para un navegador lento; los que sobran se pierden
 CSP = "default-src 'self'; img-src 'self' blob:; frame-ancestors 'none'"
 
@@ -71,7 +72,7 @@ def _encolar(cola, resultado):
         pass  # el navegador igual ve el avance en el GET /jobs/{id} que hace cada 2 s
 
 
-def crear_app(entorno=None, redis=None, difusor=None, escuchar=True):
+def crear_app(entorno=None, redis=None, difusor=None, escuchar=False):
     entorno = os.environ if entorno is None else entorno
     backend = _obligatoria(entorno, "BACKEND_URL").rstrip("/")
     log, _ = registro.configurar("frontend")
@@ -108,20 +109,92 @@ def crear_app(entorno=None, redis=None, difusor=None, escuchar=True):
         codigo, cuerpo = await run_in_threadpool(consultar_job, job_id, request.headers.get("authorization"))
         if codigo != 200:
             return Response(cuerpo, codigo, media_type="application/json")
-        suscripto = difusor.suscribir(job_id)
-        cola, _ = suscripto
+        suscripto = difusor.suscribir(job_id) if difusor else None
+        cola = suscripto[0] if suscripto else None
+        if not suscripto:
+            MIRANDO.inc()
 
         async def flujo():
+            clave_job = claves.job(job_id)
+            ultimo_completos = -1
+            ultimo_estado = None
+            tiempo_sin_actividad = 0.0
+
             try:
                 while True:
+                    emitio = False
+                    if cola:
+                        while not cola.empty():
+                            try:
+                                item = cola.get_nowait()
+                                yield f"data: {json.dumps(item)}\n\n"
+                                emitio = True
+                            except asyncio.QueueEmpty:
+                                break
+
                     try:
-                        resultado = await asyncio.wait_for(cola.get(), LATIDO)
-                    except TimeoutError:
+                        datos = await run_in_threadpool(redis.hgetall, clave_job)
+                    except Exception as error:
+                        log.warning("error al leer avance de redis para %s: %r", job_id, error)
+                        datos = {}
+
+                    if datos:
+                        def obtener(k):
+                            val = datos.get(k) if k in datos else datos.get(k.encode())
+                            if isinstance(val, bytes):
+                                return val.decode("utf-8", errors="replace")
+                            return str(val) if val is not None else ""
+
+                        estado = obtener("estado") or "processing"
+                        try:
+                            total = int(obtener("fragmentos_total") or 0)
+                        except ValueError:
+                            total = 0
+                        try:
+                            completos = int(obtener("completos") or 0)
+                        except ValueError:
+                            completos = 0
+
+                        if completos != ultimo_completos or estado != ultimo_estado:
+                            ultimo_completos = completos
+                            ultimo_estado = estado
+                            porcentaje = int((completos / total) * 100) if total > 0 else 0
+                            payload = {
+                                "job_id": job_id,
+                                "estado": estado,
+                                "completos": completos,
+                                "total": total,
+                                "porcentaje": porcentaje,
+                            }
+                            yield f"data: {json.dumps(payload)}\n\n"
+                            emitio = True
+
+                            if estado in ("done", "failed"):
+                                break
+
+                    if emitio:
+                        tiempo_sin_actividad = 0.0
+                    else:
+                        tiempo_sin_actividad += INTERVALO_REDIS
+
+                    if tiempo_sin_actividad >= LATIDO:
                         yield ": latido\n\n"
-                        continue
-                    yield f"data: {json.dumps(resultado)}\n\n"
+                        tiempo_sin_actividad = 0.0
+
+                    if cola:
+                        try:
+                            item = await asyncio.wait_for(cola.get(), timeout=INTERVALO_REDIS)
+                            yield f"data: {json.dumps(item)}\n\n"
+                            tiempo_sin_actividad = 0.0
+                        except (TimeoutError, asyncio.TimeoutError):
+                            pass
+                    else:
+                        await asyncio.sleep(INTERVALO_REDIS)
             finally:
-                difusor.desuscribir(job_id, suscripto)
+                if suscripto:
+                    difusor.desuscribir(job_id, suscripto)
+                else:
+                    MIRANDO.dec()
 
         return StreamingResponse(flujo(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -150,8 +223,9 @@ def crear_app(entorno=None, redis=None, difusor=None, escuchar=True):
             estado_redis = conexion.OK if redis.ping() else conexion.CAIDO
         except Exception:
             estado_redis = conexion.CAIDO
-        estados = {"frontend": conexion.OK, "rabbitmq": conexion.estado.get("rabbitmq", conexion.CAIDO),
-                   "redis": estado_redis}
+        estados = {"frontend": conexion.OK, "redis": estado_redis}
+        if escuchar:
+            estados["rabbitmq"] = conexion.estado.get("rabbitmq", conexion.CAIDO)
         return JSONResponse(estados, 200 if all(v == conexion.OK for v in estados.values()) else 503)
 
     @app.get("/metrics")
