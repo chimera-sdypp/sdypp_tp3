@@ -16,6 +16,7 @@ from comun import claves, colas, conexion, metricas, pixeles, registro, salud
 # -------------------------------------------------------------------------------------------------
 # 2. CONSTANTES
 # -------------------------------------------------------------------------------------------------
+
 # Operaciones que analizan píxeles vecinos con una matriz de convolución 3x3.
 # Necesitan 1 fila extra de borde (halo) arriba y abajo para calcular los bordes correctamente.
 OPERACIONES_DE_VECINDAD = {"sobel", "blur"}
