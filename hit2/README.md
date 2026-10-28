@@ -35,3 +35,16 @@ flowchart LR
   son CPU pura, sin estado y reemplazables. La justificación completa por servicio está en el informe.
 - **Sin claves en las VMs.** Bajan la imagen de Artifact Registry con su cuenta de servicio, que sólo puede leer.
 - **Red.** Los workers del Hit #1 no tienen autenticación: el firewall abre el 8080 sólo a la IP pública local.
+
+## Resultados (GCP, 28/10/2026)
+
+1 worker local más N VMs `e2-standard-2` en `southamerica-east1-a`; tiempo del master, sin el arranque de las VMs
+(93 a 140 s). Las salidas son idénticas a la centralizada y cada corrida termina con 0 VMs.
+
+| Imagen | 1 local | 2 locales | 1 local + 1 VM | 1 local + 2 VMs |
+|---|---|---|---|---|
+| 10 MB (1850×1850) | 1,31 s | 0,86 s | 1,75 s | 1,54 s |
+| 50 MB (4150×4150) | 6,12 s | 4,55 s | 6,40 s | 5,26 s |
+
+Una franja en la nube tarda 2 a 4 veces más que en la PC por el viaje por Internet: desbordar sólo conviene cuando
+la capacidad local está saturada y las VMs se mantienen mientras dura la carga. El análisis está en el informe.
