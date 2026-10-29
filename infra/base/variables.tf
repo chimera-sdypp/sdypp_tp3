@@ -29,3 +29,9 @@ variable "roles_ci" {
     "roles/artifactregistry.writer",
   ]
 }
+
+variable "k3s_jwks" {
+  description = "Clave pública del k3s donde corre el master del Hit #2 (kubectl get --raw /openid/v1/jwks); null = sin Workload Identity para k3s"
+  type        = string
+  default     = null
+}
