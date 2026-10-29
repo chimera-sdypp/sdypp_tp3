@@ -47,6 +47,7 @@ services:
     environment:
       SOBEL_WORKERS: worker:8080
       SOBEL_PARTES: ${SOBEL_PARTES:-}
+      SOBEL_COSTO: ${SOBEL_COSTO:-1}
       SOBEL_TIMEOUT: ${SOBEL_TIMEOUT:-30}
     # Sin depends_on: `run` volvería a dejar un solo worker. Los workers se levantan antes con `up`.
     profiles: [master]   # no arranca con `up`: se corre con `run`

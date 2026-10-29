@@ -3,6 +3,9 @@
     POST /sobel   cuerpo: la franja como imagen (PNG)  →  200 con el resultado en PNG
     GET  /health  →  {"worker": "ok"}
 
+POST /sobel?costo=N repite el cálculo N veces (1 a 100): simula una tarea N veces más pesada
+con el mismo resultado.
+
 Para probar la Etapa 3 (tolerancia a fallos) el worker puede simular fallos:
     SOBEL_FALLA=caida     el proceso termina al recibir una franja, sin responder
     SOBEL_FALLA=colgado   recibe la franja y nunca responde (/health sigue contestando)
@@ -21,11 +24,13 @@ import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 import registro
 import sobel
 
 MAXIMO_BYTES = 64 * 1024 * 1024
+COSTO_MAXIMO = 100
 NOMBRE = socket.gethostname()
 FALLAS = ("", "caida", "colgado")
 log, _ = registro.configurar("worker")
@@ -56,8 +61,16 @@ class Handler(BaseHTTPRequestHandler):
             self._error(404, "ruta inexistente")
 
     def do_POST(self):
-        if self.path != "/sobel":
+        url = urlsplit(self.path)
+        if url.path != "/sobel":
             self._error(404, "ruta inexistente")
+            return
+        try:
+            costo = int(parse_qs(url.query).get("costo", ["1"])[0])
+        except ValueError:
+            costo = 0
+        if not 1 <= costo <= COSTO_MAXIMO:
+            self._error(400, f"el costo tiene que ser un entero entre 1 y {COSTO_MAXIMO}")
             return
         try:
             largo = int(self.headers.get("Content-Length", ""))
@@ -83,9 +96,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.demora:
             time.sleep(self.demora)
-        resultado = sobel.a_png(sobel.aplicar(gris))
-        log.info("franja %dx%d procesada en %.3f s", gris.shape[1], gris.shape[0],
-                 time.perf_counter() - inicio)
+        for _ in range(costo):
+            filtrada = sobel.aplicar(gris)
+        resultado = sobel.a_png(filtrada)
+        log.info("franja %dx%d procesada en %.3f s (costo %d)", gris.shape[1], gris.shape[0],
+                 time.perf_counter() - inicio, costo)
         self._responder(200, resultado, "image/png")
 
     def _caer(self):

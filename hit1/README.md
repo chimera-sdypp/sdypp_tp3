@@ -8,23 +8,24 @@ docker compose run --rm -T master < entrada.jpg > salida.png
 
 docker save sobel-hit1:local | sudo k3s ctr images import -      # Etapa 2 (k3s)
 kubectl apply -f k8s/sobel.yaml
-kubectl run sobel-master -n sobel --rm -i -q --restart=Never --image=sobel-hit1:local \
+kubectl run sobel-master -n sobel-hit1 --rm -i -q --restart=Never --image=sobel-hit1:local \
   --env=SOBEL_WORKERS=sobel-worker:8080 -- python master.py - - < entrada.jpg > salida.png
 
 docker compose --profile fallas up -d --build --wait --scale worker=2   # Etapa 3 (Docker)
 SOBEL_TIMEOUT=3 docker compose run --rm -T master < entrada.jpg > salida.png
 
 kubectl apply -f k8s/sobel.yaml -f k8s/fallas.yaml                       # Etapa 3 (k3s)
-kubectl run sobel-master -n sobel --rm -i -q --restart=Never --image=sobel-hit1:local \
+kubectl run sobel-master -n sobel-hit1 --rm -i -q --restart=Never --image=sobel-hit1:local \
   --env=SOBEL_WORKERS=sobel-worker:8080 --env=SOBEL_TIMEOUT=3 -- python master.py - - < entrada.jpg > salida.png
 ```
 
 Opciones del master: `SOBEL_PARTES` (default: una franja por worker), `SOBEL_TIMEOUT` (30 s: sin respuesta
-en ese tiempo, el worker se da por caído).
+en ese tiempo, el worker se da por caído) y `SOBEL_COSTO` (1: cada worker repite Sobel N veces sobre su franja,
+para simular una tarea más pesada; el resultado es el mismo).
 Fallas simuladas del worker: `SOBEL_FALLA=caida` (termina al recibir una franja), `SOBEL_FALLA=colgado`
 (nunca responde la franja) y `SOBEL_DEMORA=<s>` (demora por franja, para matar un worker a mano a mitad
-del trabajo: `kubectl set env deployment/sobel-worker -n sobel SOBEL_DEMORA=4` y
-`kubectl delete pod <pod> -n sobel --grace-period=0 --force`).
+del trabajo: `kubectl set env deployment/sobel-worker -n sobel-hit1 SOBEL_DEMORA=4` y
+`kubectl delete pod <pod> -n sobel-hit1 --grace-period=0 --force`).
 Tests: `pytest`, `bash tests/integracion.sh` y `bash tests/tolerancia.sh`.
 
 ```mermaid
