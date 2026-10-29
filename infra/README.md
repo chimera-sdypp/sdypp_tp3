@@ -19,3 +19,14 @@ Con las salidas se cargan las **variables** del repositorio en GitHub (no son se
 Desde ahí, [`terraform.yml`](../.github/workflows/terraform.yml) hace `plan` de [`hit2/infra`](../hit2/infra) y
 [`hit3/infra`](../hit3/infra) en cada PR y `apply` al mergear a `main`, autenticado por OIDC: no hay claves de GCP
 en GitHub ni en las VMs. El estado vive en el bucket (con lock y versionado), nunca en el repo.
+
+Para que el master del [Hit #2](../hit2/README.md) cree VMs desde k3s, `infra/base` se aplica también con la clave
+pública con la que k3s firma los tokens de sus ServiceAccounts:
+
+```bash
+terraform -chdir=infra/base apply -var proyecto=<proyecto> -var "k3s_jwks=$(kubectl get --raw /openid/v1/jwks)"
+```
+
+Eso crea el pool de Workload Identity `k3s-local`: sólo la ServiceAccount `sobel-hit1:sobel-master` puede tomar la
+identidad de `sobel-ci`, y [`hit2/k8s/desplegar.sh`](../hit2/k8s/desplegar.sh) arma sus credenciales con la salida
+`proveedor_k3s`. Si k3s se reinstala, cambia la clave y hay que volver a aplicar.

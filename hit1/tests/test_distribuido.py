@@ -66,6 +66,17 @@ def test_worker_aplica_sobel(workers):
     assert np.array_equal(sobel.leer_gris(cuerpo), sobel.aplicar(gris))
 
 
+def test_worker_repite_sobel_segun_el_costo(workers, monkeypatch):
+    llamadas, original = [], sobel.aplicar
+    monkeypatch.setattr(sobel, "aplicar", lambda gris: llamadas.append(1) or original(gris))
+    gris = np.random.default_rng(4).integers(0, 256, (10, 8), dtype=np.uint8)
+    codigo, cuerpo = pedir(f"http://{workers[0][0]}/sobel?costo=3", sobel.a_png(gris))
+    assert codigo == 200 and len(llamadas) == 3
+    assert np.array_equal(sobel.leer_gris(cuerpo), original(gris))   # mismo resultado
+    for invalido in ("0", "101", "abc"):
+        assert pedir(f"http://{workers[0][0]}/sobel?costo={invalido}", sobel.a_png(gris))[0] == 400
+
+
 def test_worker_rechaza_lo_que_no_es_imagen(workers):
     codigo, cuerpo = pedir(f"http://{workers[0][0]}/sobel", b"no soy una imagen")
     assert codigo == 400 and "error" in json.loads(cuerpo)
@@ -84,6 +95,14 @@ def test_distribuido_igual_a_centralizado(workers, partes):
     assert np.array_equal(resultado, sobel.aplicar(gris))
     # Round-robin: franja i → worker i % 3.
     assert [len(a) for a in atendidas] == [len(range(i, partes, 3)) for i in range(3)]
+
+
+def test_master_pide_el_costo_a_los_workers(workers, monkeypatch):
+    llamadas, original = [], sobel.aplicar
+    monkeypatch.setattr(sobel, "aplicar", lambda gris: llamadas.append(1) or original(gris))
+    gris = np.random.default_rng(5).integers(0, 256, (50, 30), dtype=np.uint8)
+    assert np.array_equal(master.procesar(gris, workers[0], 3, timeout=5, costo=4), original(gris))
+    assert len(llamadas) == 3 * 4   # cada worker repite Sobel 4 veces en cada una de las 3 franjas
 
 
 def test_worker_caido(workers):
@@ -115,3 +134,5 @@ def test_errores_por_linea_de_comandos(workers, imagen, tmp_path):
     assert master.main([str(roto), salida, "--workers", direcciones[0]]) == 2
     assert master.main([str(imagen), salida, "--workers", direcciones[0], "--partes", "0"]) == 2
     assert master.main([str(imagen), salida, "--workers", "127.0.0.1:1"]) == 1
+    with pytest.raises(SystemExit):
+        master.main([str(imagen), salida, "--workers", direcciones[0], "--costo", "0"])

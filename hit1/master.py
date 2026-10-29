@@ -2,6 +2,9 @@
 
     python master.py entrada.jpg salida.png --workers worker:8080 --partes 4
 
+--costo N le pide a cada worker que repita Sobel N veces sobre su franja: simula una tarea más
+pesada sin cambiar el resultado.
+
 Cada host de --workers se resuelve por DNS y se toman todas sus direcciones: en Docker
 Compose `worker` devuelve una IP por réplica, así que `--scale worker=N` da N workers.
 
@@ -57,13 +60,14 @@ def resolver_workers(direcciones):
     return sorted(set(workers))
 
 
-def enviar(worker, franja, timeout):
+def enviar(worker, franja, timeout, costo=1):
     """Manda la franja (PNG) a POST /sobel del worker y devuelve el resultado como matriz.
 
     Lanza WorkerCaido si el worker no está, se corta, no responde en `timeout` segundos,
     contesta 5xx o devuelve algo que no es una imagen; ErrorFranja si contesta 4xx.
     """
-    pedido = urllib.request.Request(f"http://{worker}/sobel", data=sobel.a_png(franja),
+    url = f"http://{worker}/sobel" + (f"?costo={costo}" if costo > 1 else "")
+    pedido = urllib.request.Request(url, data=sobel.a_png(franja),
                                     headers={"Content-Type": "image/png"})
     try:
         with urllib.request.urlopen(pedido, timeout=timeout) as respuesta:
@@ -133,7 +137,7 @@ class Workers:
         return nuevos
 
 
-def procesar(gris, workers, partes, timeout, redescubrir=None):
+def procesar(gris, workers, partes, timeout, redescubrir=None, costo=1):
     """Reparte las franjas en round-robin, una por hilo, y devuelve la imagen unida.
 
     Si el worker de una franja se cae o no responde, se lo descarta y la franja se reintenta
@@ -149,7 +153,7 @@ def procesar(gris, workers, partes, timeout, redescubrir=None):
             worker = disponibles.elegir(indice)
             inicio = time.perf_counter()
             try:
-                resultado = enviar(worker, franja, timeout)
+                resultado = enviar(worker, franja, timeout, costo)
             except WorkerCaido as error:
                 disponibles.descartar(worker)
                 log.warning("franja %d/%d: %s → worker descartado, la franja se reasigna", indice + 1, partes, error)
@@ -179,18 +183,23 @@ def main(argv=None):
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("SOBEL_TIMEOUT", 30)),
                         help="segundos sin respuesta tras los que un worker se da por caído y su franja "
                              "se reasigna (default: $SOBEL_TIMEOUT o 30)")
+    parser.add_argument("--costo", type=int, default=int(os.environ.get("SOBEL_COSTO") or 1),
+                        help="veces que cada worker repite Sobel sobre su franja, para simular una tarea "
+                             "más pesada (default: $SOBEL_COSTO o 1)")
     args = parser.parse_args(argv)
+    if args.costo < 1:
+        parser.error("--costo tiene que ser 1 o más")
 
     try:
         workers = resolver_workers(args.workers)
         partes = len(workers) if args.partes is None else args.partes
         inicio = time.perf_counter()
         gris = sobel.leer(args.entrada)
-        log.info("imagen %dx%d → %d franjas entre %d workers: %s", gris.shape[1], gris.shape[0],
-                 partes, len(workers), ", ".join(workers))
+        log.info("imagen %dx%d → %d franjas entre %d workers (costo %d): %s", gris.shape[1], gris.shape[0],
+                 partes, len(workers), args.costo, ", ".join(workers))
         leida = time.perf_counter()
         resultado = procesar(gris, workers, partes, args.timeout,
-                             redescubrir=lambda: resolver_workers(args.workers))
+                             redescubrir=lambda: resolver_workers(args.workers), costo=args.costo)
         procesada = time.perf_counter()
         sobel.guardar(resultado, args.salida)
     except ErrorWorker as error:
