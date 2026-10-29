@@ -39,6 +39,7 @@ spec:
     metadata:
       labels:
         app: sobel-master
+        app.kubernetes.io/name: sobel-master   # el label `app` de sus logs en Loki
     spec:
       serviceAccountName: sobel-master
       terminationGracePeriodSeconds: 300   # termina el pedido en curso y borra las VMs antes de salir
@@ -103,16 +104,19 @@ spec:
               - key: credenciales.json
                 path: credenciales.json
 ---
-# La entrada de los clientes: http://<PC>:30080/pedidos
+# La entrada de los clientes: http://<PC>:30080/pedidos. Prometheus lo encuentra por el label (monitoreo.yaml).
 apiVersion: v1
 kind: Service
 metadata:
   name: sobel-master
   namespace: sobel-hit1
+  labels:
+    app: sobel-master
 spec:
   type: NodePort
   selector:
     app: sobel-master
   ports:
-    - port: 8080
+    - name: http
+      port: 8080
       nodePort: 30080

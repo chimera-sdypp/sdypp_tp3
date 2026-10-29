@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Despliega el Hit #2 en k3s (namespace sobel-hit1): los workers del Hit #1, RabbitMQ, Redis y el master.
+# Despliega el Hit #2 en k3s (namespace sobel-hit1): los workers del Hit #1, RabbitMQ, Redis y el master; y, si
+# está el Hit #4, el ServiceMonitor del master y su dashboard de Grafana.
 #
 #   ./desplegar.sh
 #
@@ -61,6 +62,14 @@ kubectl apply -f "$AQUI/rabbitmq.yaml" -f "$AQUI/redis.yaml"
 sed -e "s|__AUDIENCIA_WIF__|//iam.googleapis.com/$proveedor|" \
     -e "s|image: sobel-hit2:local|image: ${SOBEL_IMAGEN_MASTER:-sobel-hit2:local}|" "$AQUI/master.yaml" |
   kubectl apply -f -
+# Métricas y dashboard, si el Hit #4 (kube-prometheus-stack, hit4/instalar_observabilidad.sh) está instalado.
+if kubectl get crd servicemonitors.monitoring.coreos.com >/dev/null 2>&1; then
+  kubectl apply -f "$AQUI/monitoreo.yaml"
+  kubectl create configmap sobel-hit2-dashboard -n "$NS" --from-file=sobel-hit2.json="$AQUI/dashboard.json" \
+    --dry-run=client -o yaml | kubectl label --local -f - grafana_dashboard=1 -o yaml | kubectl apply -f -
+else
+  echo "sin el Hit #4 (Prometheus y Grafana) instalado: el master expone /metrics, pero nadie lo lee" >&2
+fi
 kubectl rollout restart deployment/sobel-master -n "$NS" >/dev/null   # toma el ConfigMap nuevo
 for deployment in rabbitmq redis sobel-master; do
   kubectl rollout status "deployment/$deployment" -n "$NS" --timeout=180s

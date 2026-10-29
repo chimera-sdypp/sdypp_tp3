@@ -19,6 +19,12 @@ los locales.
 | `GET /pedidos/<id>/resultado` | el PNG con bordes, durante 10 min |
 | `GET /estado` | pedidos en cola, atendidos por segundo, latencia media, disco usado y VMs |
 | `GET /health` | `{"master", "rabbitmq", "redis", "disco"}` |
+| `GET /metrics` | lo mismo para Prometheus (`sobel_hit2_*`): cola, VMs, umbral, llegadas, atendidos y tiempos |
+
+Con el [Hit #4](../hit4/README.md) instalado, `desplegar.sh` suma el `ServiceMonitor` del master
+([`k8s/monitoreo.yaml`](k8s/monitoreo.yaml)) y el dashboard «Sobel Hit #2 — Cola y VMs en la nube»
+([`k8s/dashboard.json`](k8s/dashboard.json)): la cola contra los umbrales, las VMs pedidas y listas, lo que llega contra
+lo que se atiende, el tiempo por pedido según los workers y los logs del master desde Loki.
 
 ```mermaid
 flowchart LR

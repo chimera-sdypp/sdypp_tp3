@@ -5,6 +5,7 @@
     GET  /pedidos/<id>/resultado    la imagen con bordes (PNG); 404 si todavía no está o ya venció
     GET  /estado                    en cola, atendidos por segundo, latencia media, disco usado y VMs
     GET  /health                    {"master": "ok", "rabbitmq": ..., "redis": ..., "disco": ...}
+    GET  /metrics                   las mismas cuentas para Prometheus (prefijo sobel_hit2_)
 
 La imagen se guarda en el disco del master (almacen.py, el volumen SOBEL_DATOS), el estado del pedido en Redis y a la
 cola sobel.peticiones va sólo el id. Un consumidor toma los pedidos de a uno, reparte las franjas entre los workers
@@ -28,6 +29,7 @@ from urllib.parse import parse_qs, urlsplit
 import pika
 import redis
 from PIL import Image, UnidentifiedImageError
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 import almacen
 import escalador
@@ -47,6 +49,19 @@ MAX_DISCO = int(float(os.environ.get("SOBEL_MAX_DISCO_GB", 20)) * 2**30)
 MAXIMO_BYTES = 150 * 1024 * 1024
 COLA_PETICIONES, COLA_RESULTADOS = "sobel.peticiones", "sobel.resultados"
 ESPERAS = (1, 2, 4, 8, 16, 30)   # reconexión a RabbitMQ con backoff, con tope de 30 s
+
+# Para Prometheus (hit2/k8s/monitoreo.yaml): el mismo Prometheus lee al Hit #3, de ahí el prefijo sobel_hit2_.
+RECIBIDOS = Counter("sobel_hit2_pedidos_recibidos_total", "Pedidos aceptados por POST /pedidos")
+ATENDIDOS = Counter("sobel_hit2_pedidos_atendidos_total", "Pedidos terminados", ["estado"])
+TIEMPO = Histogram("sobel_hit2_tiempo_pedido_segundos", "Lo que tardó el reparto de cada pedido, según cuántos "
+                   "workers lo atendieron", ["workers"], buckets=(2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 25, 30, 45, 60))
+LATENCIA = Histogram("sobel_hit2_latencia_segundos", "De la llegada al resultado: la espera en la cola más el reparto",
+                     buckets=(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 300, 600))
+EN_COLA = Gauge("sobel_hit2_pedidos_en_cola", "Pedidos esperando en sobel.peticiones")
+VMS = Gauge("sobel_hit2_vms", "VMs en GCP: las pedidas a Terraform y las listas (responden /health)", ["estado"])
+UMBRAL = Gauge("sobel_hit2_umbral_pedidos", "Pedidos en espera por cada VM que lanza el escalador")
+MAXIMO_VMS = Gauge("sobel_hit2_vms_maximo", "Tope de VMs del escalador")
+DISCO = Gauge("sobel_hit2_disco_bytes", "Lo que ocupan las imágenes en el volumen del master")
 
 
 def conectar(latido=60):
@@ -88,6 +103,19 @@ class Master:
         self.usando = []                      # los workers del pedido en curso (el escalador no borra esas VMs)
         self.escalador = escalador.desde_entorno(en_cola, lambda: list(self.usando))
         self.detener = threading.Event()
+        EN_COLA.set_function(self._en_cola_o_nan)        # se calculan cuando Prometheus pide /metrics
+        VMS.labels("pedidas").set_function(lambda: self.escalador.estado()["pedidas"])
+        VMS.labels("listas").set_function(lambda: len(self.escalador.nube()))
+        UMBRAL.set(self.escalador.umbral)
+        MAXIMO_VMS.set(self.escalador.maximo)
+        DISCO.set_function(self.archivos.usado)
+
+    @staticmethod
+    def _en_cola_o_nan():
+        try:
+            return en_cola()
+        except pika.exceptions.AMQPError:   # sin RabbitMQ /metrics sigue respondiendo, con el hueco en el gráfico
+            return float("nan")
 
     # ------------------------------------------------------------------ API
     def recibir(self, datos, costo, nombre):
@@ -103,6 +131,7 @@ class Master:
             tuberia.expire(clave, VENCIMIENTO * 6)
             tuberia.execute()
         publicar(COLA_PETICIONES, {"id": id_})
+        RECIBIDOS.inc()
         return id_
 
     def consultar(self, id_):
@@ -185,6 +214,10 @@ class Master:
         self.base.expire(clave, VENCIMIENTO)
         self.archivos.borrar(id_, "entrada")
         self.hechos.append((fin, fin - llegada))
+        ATENDIDOS.labels(estado["estado"]).inc()
+        if estado["estado"] == "done":
+            TIEMPO.labels(str(len(workers))).observe(fin - inicio)
+            LATENCIA.observe(fin - llegada)
         publicar(COLA_RESULTADOS, {"id": id_, "estado": estado["estado"], "latencia_s": round(fin - llegada, 3),
                                    "workers": len(workers)})
         log.info("pedido %s %s: esperó %.1f s y tardó %.1f s con %d workers (costo %d)", id_, estado["estado"],
@@ -240,6 +273,8 @@ class Handler(BaseHTTPRequestHandler):
             self._responder(200 if all(v == "ok" for v in partes.values()) else 503, partes)
         elif ruta == "/estado":
             self._responder(200, self.master.estadisticas())
+        elif ruta == "/metrics":
+            self._responder(200, generate_latest(), CONTENT_TYPE_LATEST)
         elif encontrado := re.fullmatch(r"/pedidos/([0-9a-f]{12})(/resultado)?", ruta):
             id_, resultado = encontrado.groups()
             if resultado:

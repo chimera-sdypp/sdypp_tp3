@@ -16,6 +16,7 @@ spec:
     metadata:
       labels:
         app: redis
+        app.kubernetes.io/name: redis   # el label `app` de sus logs en Loki
     spec:
       containers:
         - name: redis

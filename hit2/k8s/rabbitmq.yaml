@@ -15,6 +15,7 @@ spec:
     metadata:
       labels:
         app: rabbitmq
+        app.kubernetes.io/name: rabbitmq   # el label `app` de sus logs en Loki
     spec:
       containers:
         - name: rabbitmq
