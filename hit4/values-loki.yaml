@@ -1,0 +1,75 @@
+# ==============================================================================
+# Values para grafana/loki (Helm Chart) — Hit #4: logs de todos los pods
+# ==============================================================================
+# Loki guarda los logs que le manda Fluent Bit y Grafana los consulta con LogQL.
+# Un solo pod (SingleBinary) con el disco local: alcanza para el volumen del TP
+# y evita depender de un bucket. Corre en el grupo de infraestructura, como
+# Prometheus y Grafana.
+# ==============================================================================
+
+deploymentMode: SingleBinary
+
+loki:
+  # Un solo inquilino: sin esto Loki exige el header X-Scope-OrgID en cada pedido.
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  # La misma retención que Prometheus (values.yaml): 7 días.
+  limits_config:
+    retention_period: 168h
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  nodeSelector:
+    sobel/infra: "true"
+  tolerations:
+    - key: "sobel/infra"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+
+# Sin gateway: Fluent Bit y Grafana le hablan directo al Service `loki:3100`.
+gateway:
+  enabled: false
+
+# Los componentes del modo distribuido quedan en 0: todo corre en el SingleBinary.
+read:
+  replicas: 0
+write:
+  replicas: 0
+backend:
+  replicas: 0
+
+# Cachés en memcached, el canary y el pod de test: no hacen falta con un solo pod.
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
