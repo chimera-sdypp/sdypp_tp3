@@ -96,10 +96,9 @@ spec:
             - name: SOBEL_PUERTO
               value: "8080"
 
-            # SOBEL_PARTES: 0 activa el cálculo dinámico multivariable (tamaño, workers y colas)
-            # Si se desea forzar un número fijo para pruebas específicas, se puede poner ej. "4"
+            # SOBEL_PARTES: en la imagen 1.0.0 requiere >= 1. Para la nueva versión soporta 0 (dinámico).
             - name: SOBEL_PARTES
-              value: "0"
+              value: "4"
 
             # Cantidad máxima de reintentos antes de mandar a la DLQ si el split crashea con un mensaje
             - name: SOBEL_LIMITE_ENTREGAS

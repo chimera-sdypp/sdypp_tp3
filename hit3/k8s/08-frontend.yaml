@@ -84,19 +84,24 @@ spec:
               containerPort: 8080
           # Variables de entorno inyectadas al contenedor:
           env:
-            # 1. Conexión a Redis: extraída del Secret 'sobel-secretos' para estado global y avance
+            # 1. Conexión a RabbitMQ (requerida por la imagen 1.0.0; en la nueva versión es opcional)
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: sobel-secretos
+                  key: RABBITMQ_URL
+            # 2. Conexión a Redis: extraída del Secret 'sobel-secretos' para estado global y avance
             - name: REDIS_URL
               valueFrom:
                 secretKeyRef:
                   name: sobel-secretos
                   key: REDIS_URL
-            # 2. Puerto HTTP donde corre FastAPI/Uvicorn dentro del contenedor
+            # 3. Puerto HTTP donde corre FastAPI/Uvicorn dentro del contenedor
             - name: SOBEL_PUERTO
               value: "8080"
-            # 3. URL interna para comunicarse con el microservicio Backend (validar tokens y jobs)
+            # 4. URL interna para comunicarse con el microservicio Backend (validar tokens y jobs)
             - name: BACKEND_URL
               value: "http://backend:8080"
-            # NOTA DEFENSA: Se eliminó RABBITMQ_URL. El frontend ya no ata colas exclusivas.
           resources:
             # Recursos garantizados por Kubernetes para planificar el pod en un nodo
             requests:
