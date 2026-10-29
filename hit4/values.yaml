@@ -99,6 +99,15 @@ grafana:
       enabled: true
       defaultDatasourceEnabled: true
 
+  # Los logs que junta Fluent Bit (values-fluent-bit.yaml) y guarda Loki (values-loki.yaml).
+  # El uid fijo es el que usan los paneles de logs del dashboard.
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      uid: loki
+      url: http://loki.monitoring.svc.cluster.local:3100
+      access: proxy
+
 # ------------------------------------------------------------------------------
 # 3. Alertmanager
 # ------------------------------------------------------------------------------
