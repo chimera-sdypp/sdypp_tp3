@@ -1,0 +1,48 @@
+# Las dos colas del Hit #2 (sobel.peticiones y sobel.resultados) las declara el master al conectarse.
+# Sin volumen: si el pod se reinicia, los pedidos en cola se pierden (es una demo); el usuario y la clave salen del
+# Secret sobel-hit2-rabbitmq que crea desplegar.sh.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: sobel-hit1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4-management
+          envFrom:
+            - secretRef:
+                name: sobel-hit2-rabbitmq
+          ports:
+            - containerPort: 5672
+            - containerPort: 15672
+          readinessProbe:
+            tcpSocket:
+              port: 5672
+            periodSeconds: 5
+          resources:
+            limits:
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: sobel-hit1
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+    - name: gestion
+      port: 15672
