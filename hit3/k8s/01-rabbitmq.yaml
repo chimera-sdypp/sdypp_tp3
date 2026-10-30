@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rabbitmq-plugins
+  name: rabbitmq-config
   namespace: sobel
   labels:
     app.kubernetes.io/name: rabbitmq
@@ -9,6 +9,36 @@ metadata:
 data:
   enabled_plugins: |
     [rabbitmq_management, rabbitmq_prometheus].
+  rabbitmq.conf: |
+    cluster_formation.peer_discovery_backend = classic_config
+    cluster_formation.classic_config.nodes.1 = rabbit@rabbitmq-0.rabbitmq-nodes.sobel.svc.cluster.local
+    cluster_formation.classic_config.nodes.2 = rabbit@rabbitmq-1.rabbitmq-nodes.sobel.svc.cluster.local
+    cluster_formation.classic_config.nodes.3 = rabbit@rabbitmq-2.rabbitmq-nodes.sobel.svc.cluster.local
+    cluster_partition_handling = autoheal
+    queue_leader_locator = balanced
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-nodes
+  namespace: sobel
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/component: message-broker
+    sobel/infra: "true"
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+    - name: epmd
+      port: 4369
+    - name: dist
+      port: 25672
 ---
 apiVersion: v1
 kind: Service
@@ -44,8 +74,9 @@ metadata:
     app.kubernetes.io/component: message-broker
     sobel/infra: "true"
 spec:
-  serviceName: rabbitmq
-  replicas: 1
+  serviceName: rabbitmq-nodes
+  podManagementPolicy: Parallel
+  replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: rabbitmq
@@ -63,6 +94,25 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+      initContainers:
+        - name: setup-cookie
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo -n "$RABBITMQ_ERLANG_COOKIE" > /var/lib/rabbitmq/.erlang.cookie
+              chmod 400 /var/lib/rabbitmq/.erlang.cookie
+              chown 999:999 /var/lib/rabbitmq/.erlang.cookie
+          env:
+            - name: RABBITMQ_ERLANG_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  name: sobel-secretos
+                  key: RABBITMQ_ERLANG_COOKIE
+          volumeMounts:
+            - name: rabbitmq-data
+              mountPath: /var/lib/rabbitmq
       containers:
         - name: rabbitmq
           image: rabbitmq:4-management
@@ -74,7 +124,19 @@ spec:
               containerPort: 15672
             - name: prometheus
               containerPort: 15692
+            - name: epmd
+              containerPort: 4369
+            - name: dist
+              containerPort: 25672
           env:
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: RABBITMQ_USE_LONGNAME
+              value: "true"
+            - name: RABBITMQ_NODENAME
+              value: "rabbit@$(HOSTNAME).rabbitmq-nodes.sobel.svc.cluster.local"
             - name: RABBITMQ_DEFAULT_USER
               valueFrom:
                 secretKeyRef:
@@ -85,10 +147,18 @@ spec:
                 secretKeyRef:
                   name: sobel-secretos
                   key: RABBITMQ_DEFAULT_PASS
+            - name: RABBITMQ_ERLANG_COOKIE
+              valueFrom:
+                secretKeyRef:
+                  name: sobel-secretos
+                  key: RABBITMQ_ERLANG_COOKIE
           volumeMounts:
             - name: rabbitmq-data
               mountPath: /var/lib/rabbitmq
-            - name: plugins-config
+            - name: rabbitmq-config
+              mountPath: /etc/rabbitmq/rabbitmq.conf
+              subPath: rabbitmq.conf
+            - name: rabbitmq-config
               mountPath: /etc/rabbitmq/enabled_plugins
               subPath: enabled_plugins
           resources:
@@ -101,19 +171,19 @@ spec:
           readinessProbe:
             tcpSocket:
               port: 5672
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 5
             timeoutSeconds: 3
           livenessProbe:
             tcpSocket:
               port: 5672
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 3
       volumes:
-        - name: plugins-config
+        - name: rabbitmq-config
           configMap:
-            name: rabbitmq-plugins
+            name: rabbitmq-config
   volumeClaimTemplates:
     - metadata:
         name: rabbitmq-data

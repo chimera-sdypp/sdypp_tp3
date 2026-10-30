@@ -31,11 +31,13 @@ existente() {
   kubectl get secret sobel-secretos --namespace="${NAMESPACE}" -o "jsonpath={.data.$1}" 2>/dev/null | base64 -d || true
 }
 
-# 1. RabbitMQ: Usuario y contraseña seguros
+# 1. RabbitMQ: Usuario, contraseña y Erlang Cookie para clustering
 RABBITMQ_USER="${RABBITMQ_USER:-$(existente RABBITMQ_USER)}"
 RABBITMQ_USER="${RABBITMQ_USER:-sobel_admin}"
 RABBITMQ_PASS="${RABBITMQ_PASS:-$(existente RABBITMQ_PASS)}"
 RABBITMQ_PASS="${RABBITMQ_PASS:-$(generar_clave 24)}"
+RABBITMQ_ERLANG_COOKIE="${RABBITMQ_ERLANG_COOKIE:-$(existente RABBITMQ_ERLANG_COOKIE)}"
+RABBITMQ_ERLANG_COOKIE="${RABBITMQ_ERLANG_COOKIE:-$(generar_clave 32)}"
 RABBITMQ_HOST="${RABBITMQ_HOST:-rabbitmq.${NAMESPACE}.svc.cluster.local}"
 RABBITMQ_PORT="${RABBITMQ_PORT:-5672}"
 RABBITMQ_URL="amqp://${RABBITMQ_USER}:${RABBITMQ_PASS}@${RABBITMQ_HOST}:${RABBITMQ_PORT}/"
@@ -58,6 +60,7 @@ kubectl create secret generic sobel-secretos \
   --from-literal=RABBITMQ_DEFAULT_PASS="${RABBITMQ_PASS}" \
   --from-literal=RABBITMQ_USER="${RABBITMQ_USER}" \
   --from-literal=RABBITMQ_PASS="${RABBITMQ_PASS}" \
+  --from-literal=RABBITMQ_ERLANG_COOKIE="${RABBITMQ_ERLANG_COOKIE}" \
   --from-literal=RABBITMQ_URL="${RABBITMQ_URL}" \
   --from-literal=REDIS_PASS="${REDIS_PASS}" \
   --from-literal=REDIS_URL="${REDIS_URL}" \
@@ -72,6 +75,7 @@ cat <<EOF > "$ARCHIVO_ENV_SECRETS"
 # Archivo local sensible: NO COMMITEAR (ignorado en .gitignore)
 RABBITMQ_USER=${RABBITMQ_USER}
 RABBITMQ_PASS=${RABBITMQ_PASS}
+RABBITMQ_ERLANG_COOKIE=${RABBITMQ_ERLANG_COOKIE}
 RABBITMQ_URL=${RABBITMQ_URL}
 REDIS_PASS=${REDIS_PASS}
 REDIS_URL=${REDIS_URL}
