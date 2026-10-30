@@ -1,3 +1,12 @@
+# ==============================================================================
+# RabbitMQ 4 Clustereado en Kubernetes (Hit #3) — Alta Disponibilidad (CP)
+# ==============================================================================
+# Implementa un cluster nativo de 3 réplicas con consenso Raft (Quorum Queues).
+# Con 3 nodos, el quorum es 2/3 (mayoría absoluta): tolera la caída de 1 nodo
+# sin pérdida de mensajes ni interrupción del servicio.
+# ==============================================================================
+
+# 1. Configuración de plugins y parámetros de clustering de RabbitMQ
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,16 +16,25 @@ metadata:
     app.kubernetes.io/name: rabbitmq
     app.kubernetes.io/component: message-broker
 data:
+  # Plugins habilitados: gestión web (15672) y métricas para Prometheus (15692)
   enabled_plugins: |
     [rabbitmq_management, rabbitmq_prometheus].
+
+  # Configuración principal de RabbitMQ (formato rabbitmq.conf)
   rabbitmq.conf: |
+    ## Backend clásico de descubrimiento de pares (peer discovery sin RBAC complejo)
     cluster_formation.peer_discovery_backend = classic_config
     cluster_formation.classic_config.nodes.1 = rabbit@rabbitmq-0.rabbitmq-nodes.sobel.svc.cluster.local
     cluster_formation.classic_config.nodes.2 = rabbit@rabbitmq-1.rabbitmq-nodes.sobel.svc.cluster.local
     cluster_formation.classic_config.nodes.3 = rabbit@rabbitmq-2.rabbitmq-nodes.sobel.svc.cluster.local
+
+    ## Resolución de particiones de red: autoheal sana particiones reconectando
     cluster_partition_handling = autoheal
+
+    ## Balanceo de líderes de colas quorum entre los 3 nodos del cluster
     queue_leader_locator = balanced
 ---
+# 2. Headless Service para identidad de red y descubrimiento DNS de pods
 apiVersion: v1
 kind: Service
 metadata:
@@ -29,6 +47,7 @@ metadata:
 spec:
   type: ClusterIP
   clusterIP: None
+  # Permite que CoreDNS resuelva las IPs de los pods aun antes de estar Ready (clave para clustering inicial)
   publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: rabbitmq
@@ -40,6 +59,7 @@ spec:
     - name: dist
       port: 25672
 ---
+# 3. Service ClusterIP balanceador para los clientes (backend, split, worker, joiner)
 apiVersion: v1
 kind: Service
 metadata:
@@ -64,6 +84,7 @@ spec:
       port: 15692
       targetPort: 15692
 ---
+# 4. StatefulSet de 3 réplicas en el pool de infraestructura
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -75,6 +96,7 @@ metadata:
     sobel/infra: "true"
 spec:
   serviceName: rabbitmq-nodes
+  # Arranque en paralelo para que los 3 nodos puedan descubrirse simultáneamente sin bloquearse
   podManagementPolicy: Parallel
   replicas: 3
   selector:
@@ -87,6 +109,7 @@ spec:
         app.kubernetes.io/component: message-broker
         sobel/infra: "true"
     spec:
+      # Confinamiento estricto en el pool de infraestructura
       nodeSelector:
         sobel/infra: "true"
       tolerations:
@@ -94,6 +117,8 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+
+      # Contenedor de inicialización: prepara la cookie de Erlang con permisos estrictos (chmod 400, uid 999)
       initContainers:
         - name: setup-cookie
           image: busybox:1.36
@@ -113,6 +138,7 @@ spec:
           volumeMounts:
             - name: rabbitmq-data
               mountPath: /var/lib/rabbitmq
+
       containers:
         - name: rabbitmq
           image: rabbitmq:4-management
@@ -129,6 +155,7 @@ spec:
             - name: dist
               containerPort: 25672
           env:
+            # Nombre DNS calificado (FQDN) usando el nombre del pod y el headless service
             - name: HOSTNAME
               valueFrom:
                 fieldRef:
@@ -184,6 +211,7 @@ spec:
         - name: rabbitmq-config
           configMap:
             name: rabbitmq-config
+  # Volumen persistente independiente para cada réplica (mnesia y logs Raft de quorum queues)
   volumeClaimTemplates:
     - metadata:
         name: rabbitmq-data
