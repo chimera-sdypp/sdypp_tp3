@@ -37,13 +37,14 @@ flowchart LR
         W[worker por imagen]
     end
     subgraph infra["pool infra"]
-        MQ[(RabbitMQ)]
+        MQ[(RabbitMQ x3)]
         RD[(Redis)]
         P[Prometheus y Grafana]
     end
     B -->|sobel.split| S
     S -->|"sobel.tareas.imagen"| W
-    W -->|sobel.resultados| J & F
+    W -->|sobel.resultados| J
+    F -.->|avance del job| RD
     W -.->|sobel.dlq| R -.->|reintento| W
     apps & fuera --- infra
 ```
@@ -65,8 +66,9 @@ Las flechas entre servicios son colas de RabbitMQ; los píxeles y el estado de c
   queda en `dlq` hasta que un admin lo reprocese. Nunca reintenta sin límite. El split
   y el joiner también mandan a la DLQ lo que no pueden procesar, pero eso no se arregla reintentando: el job pasa a
   `failed`.
-- **Fanout de resultados.** `sobel.resultados` llega al joiner (una cola compartida: compiten sus réplicas) y al
-  frontend (una cola exclusiva por réplica: cada una ve todos los resultados).
+- **Fanout de resultados.** `sobel.resultados` llega al joiner (una cola compartida: compiten sus réplicas).
+- **Frontend sin estado.** El avance que ve el navegador sale de Redis (`job:<id>`, `completos` y `fragmentos_total`), no
+  de RabbitMQ: cualquier réplica atiende a cualquier navegador.
 - **Backend sin estado (R4).** La identidad viaja en cada pedido (JWT HS256 con rol) y el límite por usuario se cuenta
   en Redis, así que da lo mismo qué réplica atiende. Un job ajeno da `404`, no `403`.
 - **Sin credenciales en el repo.** Las imágenes son privadas en GHCR y el CI las publica con el `GITHUB_TOKEN` del job,
