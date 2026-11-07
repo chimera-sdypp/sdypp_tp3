@@ -72,7 +72,6 @@ GUIA_DESPLIEGUE_KUBERNETES.md
 
 # Test data & load test artifacts
 hit3/carga/datos/
-hit3/carga/resultados/
 
 
 # Terraform: el estado vive en el bucket remoto, nunca acá
