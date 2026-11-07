@@ -48,7 +48,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: joiner
-          image: ghcr.io/chimera-sdypp/sobel-joiner:1.1.0
+          image: ghcr.io/chimera-sdypp/sobel-joiner:1.1.1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
