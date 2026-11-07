@@ -21,6 +21,7 @@ DIR_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR_SCRIPT"
 
 TARGET_URL="${TARGET_URL:-http://localhost}"
+TARGET_URL="${TARGET_URL%/}"
 DURATION="${DURATION:-30s}"
 RAMP_UP="${RAMP_UP:-5s}"
 NAMESPACE="${SOBEL_NAMESPACE:-sobel}"
@@ -30,7 +31,7 @@ V1_VALORES="${V1_VALORES:-1mb 10mb}"
 K6_IMAGEN="grafana/k6:1.8.1"
 LIMITE_PEDIDO=$((200 * 1024 * 1024))  # contrato: un pedido de más de 200 MiB recibe 413
 
-CORRIDA="resultados/$(date +%Y%m%d_%H%M%S)"
+CORRIDA="${CORRIDA:-resultados/$(date +%Y%m%d_%H%M%S)}"
 mkdir -p "$CORRIDA"
 
 asegurar_datos() {
