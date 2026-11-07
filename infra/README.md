@@ -30,3 +30,8 @@ terraform -chdir=infra/base apply -var proyecto=<proyecto> -var "k3s_jwks=$(kube
 Eso crea el pool de Workload Identity `k3s-local`: sólo la ServiceAccount `sobel-hit1:sobel-master` puede tomar la
 identidad de `sobel-ci`, y [`hit2/k8s/desplegar.sh`](../hit2/k8s/desplegar.sh) arma sus credenciales con la salida
 `proveedor_k3s`. Si k3s se reinstala, cambia la clave y hay que volver a aplicar.
+
+**Sin facturación.** Desde el 04/11/2026 el proyecto `chimera-tp3` no tiene cuenta de facturación, y GCP no deja ni leer
+el bucket del estado. Mientras tanto, la variable del repositorio `TF_ACTIVO=false` saltea el `plan` y el `apply`
+(el `validate` sigue corriendo); con facturación de nuevo, se pone en `true`. El Hit #3 corre ahora en otro GKE,
+compartido con otro grupo ([`hit3/k8s-gke`](../hit3/k8s-gke/kustomization.yaml)).
