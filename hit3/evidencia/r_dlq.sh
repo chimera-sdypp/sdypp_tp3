@@ -229,7 +229,7 @@ echo
 # El administrador dispara el reprocesamiento: el Backend extrae los mensajes de
 # 'sobel.dlq.agotados', resetea el contador de intento a 1 y los reenvía a la cola del worker.
 amarillo "8. Ejecutando reprocesamiento de administrador (POST /admin/dlq/reprocesar)..."
-RESP_REPROC=$(curl -s -X POST -H "Authorization: Bearer $ADMIN" "$URL/admin/dlq/reprocesar")
+RESP_REPROC=$(curl -s -X POST -d "" -H "Authorization: Bearer $ADMIN" "$URL/admin/dlq/reprocesar")
 echo "$RESP_REPROC" | python3 -m json.tool
 echo
 

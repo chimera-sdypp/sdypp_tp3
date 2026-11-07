@@ -29,9 +29,9 @@ Abadi (2012) completa el teorema con el caso normal: **si hay partición (P)**, 
 ## 3. Qué elige cada broker
 
 ### 3.1 Lo que desplegamos, sin maquillaje
-En `hit3/k8s/01-rabbitmq.yaml` y `hit3/k8s/02-redis.yaml` corre **una sola réplica** de cada uno (`replicas: 1`), Redis con `--appendonly yes`. Con un único nodo no hay partición *entre réplicas* que resolver: cada broker es trivialmente consistente y, a la vez, un **punto único de falla**. Si se cae, el sistema no responde con datos viejos: espera. Los servicios reconectan con backoff (sección 5.3) y el `/health` de cada uno marca `"caido"`, así que la *readiness probe* los saca del Service. En términos de CAP, ante una partición entre un servicio y su broker el sistema se comporta como **CP**: deja de estar disponible antes que inventar un estado.
+Desde la versión 1.1.0, RabbitMQ corre con **3 réplicas** (`hit3/k8s/01-rabbitmq.yaml`): las colas quorum se replican en los tres nodos y se tolera la caída de uno (sección 3.2). Redis sigue con **una sola réplica** (`hit3/k8s/02-redis.yaml`, `replicas: 1`, con `--appendonly yes`): no hay partición *entre réplicas* que resolver, es trivialmente consistente y, a la vez, un **punto único de falla**. Si se cae, el sistema no responde con datos viejos: espera. Los servicios reconectan con backoff (sección 5.3) y el `/health` de cada uno marca `"caido"`, así que la *readiness probe* los saca del Service. En términos de CAP, ante una partición entre un servicio y su broker el sistema se comporta como **CP**: deja de estar disponible antes que inventar un estado.
 
-El análisis que sigue es el que importa para llevar el sistema a la nube con réplicas, que es lo que el enunciado anticipa.
+El análisis que sigue explica qué elige cada uno cuando tiene réplicas, que es lo que el enunciado anticipa para la nube.
 
 ### 3.2 RabbitMQ con colas *quorum*: CP
 Todas nuestras colas son *quorum* (`x-queue-type: quorum`, en `hit3/comun/colas.py`). Una cola quorum se replica con **Raft**: tiene un líder y seguidores, y un mensaje se considera aceptado cuando lo escribió en disco **la mayoría** de las réplicas. Con 3 réplicas tolera la caída de 1; si una partición deja al líder en minoría, esa parte deja de aceptar publicaciones y entregas hasta que se recupera la mayoría. Es una elección explícita de **C sobre A**: RabbitMQ prefiere no responder antes que confirmar un mensaje que después podría perder o entregar dos veces por dos líderes distintos.
@@ -47,7 +47,7 @@ En PACELC es **PA/EL**: elige latencia. Es lo que lo hace rápido, y es por lo q
 * **La persistencia también es asincrónica.** Con `appendonly yes` y el `appendfsync everysec` por defecto, una caída del nodo puede perder hasta un segundo de escrituras, aun sin réplicas.
 
 ### 3.4 Qué cambiaríamos en la nube
-* **RabbitMQ:** un clúster de 3 nodos, en zonas distintas, con las mismas colas quorum (replicación de 3). El código no cambia: ya publica con confirms y declara quorum.
+* **RabbitMQ:** un clúster de 3 nodos con las mismas colas quorum (replicación de 3). **Ya está hecho desde la versión 1.1.0**, sin cambiar el código: ya publicaba con confirms y declaraba quorum. Se probó en k3s borrando a la fuerza el nodo líder de la cola de tareas con un job en curso: Raft eligió otro líder, el job terminó y el nodo volvió al clúster. En la nube faltaría repartir los nodos en zonas distintas.
 * **Redis:** un servicio administrado con una réplica y failover automático, aceptando que se pierden las escrituras de los últimos milisegundos. Lo que más nos expone es que un mensaje reciba `ack` en RabbitMQ y la escritura que lo justificaba se pierda en el failover de Redis: por ejemplo, el joiner une un archivo, hace `ack` y la marca en `unidos` no llega a la réplica. La mitigación barata es `WAIT 1 <timeout>` antes del `ack` en las escrituras que cierran algo (el resultado unido y el cierre del job). No elimina el riesgo, pero lo reduce a un failover que justo elija la réplica atrasada.
 
 ---
@@ -165,7 +165,7 @@ El backoff es sólo para **conexiones**. Una tarea que falla se reintenta ensegu
 
 ## 6. Conclusiones
 
-RabbitMQ con colas quorum y Redis replicado hacen elecciones opuestas: el primero prefiere no responder antes que perder un mensaje confirmado (CP, y EC sin partición), y el segundo prefiere responder rápido aunque un failover pierda la última escritura (AP, y EL sin partición). Nuestra arquitectura usa a cada uno para lo que garantiza. RabbitMQ asegura que ninguna tarea se pierda, pero puede entregarla más de una vez; Redis guarda los datos, pero se le pide sólo atomicidad sobre un nodo. Entre los dos, la consistencia del sistema descansa en tres reglas del código: manejadores idempotentes, primero el dato y después la marca, y `WATCH` para lo que tiene que pasar una sola vez. Con un nodo de cada uno, como hoy, esto alcanza. Con réplicas en la nube, el próximo paso es acotar con `WAIT` la ventana en la que Redis puede perder una escritura que RabbitMQ ya dio por hecha.
+RabbitMQ con colas quorum y Redis replicado hacen elecciones opuestas: el primero prefiere no responder antes que perder un mensaje confirmado (CP, y EC sin partición), y el segundo prefiere responder rápido aunque un failover pierda la última escritura (AP, y EL sin partición). Nuestra arquitectura usa a cada uno para lo que garantiza. RabbitMQ asegura que ninguna tarea se pierda, pero puede entregarla más de una vez; Redis guarda los datos, pero se le pide sólo atomicidad sobre un nodo. Entre los dos, la consistencia del sistema descansa en tres reglas del código: manejadores idempotentes, primero el dato y después la marca, y `WATCH` para lo que tiene que pasar una sola vez. Con RabbitMQ en 3 nodos y Redis en uno, como hoy, esto alcanza. Si Redis pasa a tener réplicas, el próximo paso es acotar con `WAIT` la ventana en la que puede perder una escritura que RabbitMQ ya dio por hecha.
 
 ---
 
