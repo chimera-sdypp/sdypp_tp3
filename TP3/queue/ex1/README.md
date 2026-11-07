@@ -1,5 +1,7 @@
 # Hit #0 — Ejemplo 1: Message Queue (Punto a Punto)
 
+Video: [hit0-ex1-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/hit0-ex1-demo.mp4).
+
 Este módulo implementa el patrón **Message Queue (Punto a Punto)** utilizando **RabbitMQ** (protocolo AMQP 0-9-1) y Python (`pika`).
 
 ---

@@ -18,8 +18,10 @@ La API completa, los errores y las interfaces entre servicios están en el [cont
 en [k8s/](k8s/README.md); la observabilidad, en el [Hit #4](../hit4/README.md).
 
 Tests: `pytest` en cada carpeta de servicio, y `pytest -m integracion` con `RABBITMQ_URL` y `REDIS_URL`.
-Evidencia: [`evidencia/r1.sh`](evidencia/r1.sh) (registry privado) y [`evidencia/r4.sh`](evidencia/r4.sh) (roles y
-réplicas sin estado).
+Evidencia: [`evidencia/r1.sh`](evidencia/r1.sh) (registry privado), [`evidencia/r4.sh`](evidencia/r4.sh) (roles y
+réplicas sin estado), [`evidencia/r_dlq.sh`](evidencia/r_dlq.sh) (falla provocada: reintentos → DLQ → agotados →
+reprocesar; salida en [`r_dlq-k3s.txt`](evidencia/r_dlq-k3s.txt)) y la carga con k6 en
+[`carga/resultados/`](carga/resultados/) (análisis en el informe, sección 9).
 
 ```mermaid
 flowchart LR

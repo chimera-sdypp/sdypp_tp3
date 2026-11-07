@@ -58,7 +58,7 @@ hit3/carga/
 ├── smoke_test.js        # Test de humo para validación rápida del contrato
 ├── README.md            # Documentación de uso y análisis
 ├── datos/               # Imágenes sintéticas y tokens (ignorado en git)
-└── resultados/<fecha>/  # JSON de cada celda e informe.md de la corrida (ignorado en git)
+└── resultados/<fecha>/  # JSON de cada celda e informe.md de la corrida (se versiona)
 ```
 
 ---

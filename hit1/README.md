@@ -1,5 +1,7 @@
 # Hit #1 — Operador de Sobel
 
+Video: [tp3-hit1-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/tp3-hit1-demo.mp4).
+
 ```bash
 python centralizado.py entrada.jpg salida.png                    # Etapa 1
 
