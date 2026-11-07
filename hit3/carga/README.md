@@ -1,5 +1,7 @@
 # Pruebas de Carga con k6 — Matriz R5 (Hit #3)
 
+**Resultados en la nube (GKE, 07/11/2026), con el análisis del cuello de botella: [`resultados/gke-20261107/`](resultados/gke-20261107/README.md).**
+
 Este directorio contiene la suite de pruebas de carga automatizada con **k6** para evaluar el rendimiento, la escalabilidad y la tolerancia a fallos del sistema distribuido asincrónico Sobel, según los requisitos de **R5** y el contrato definido en `hit3/contrato.md`.
 
 ---

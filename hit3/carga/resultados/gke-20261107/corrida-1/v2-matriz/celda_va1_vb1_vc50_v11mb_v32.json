@@ -1,0 +1,203 @@
+{
+    "root_group": {
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "POST /jobs responde 202": {
+                    "id": "2ae5d44659f7b35ac1388903da5a3cd2",
+                    "passes": 181,
+                    "fails": 0,
+                    "name": "POST /jobs responde 202",
+                    "path": "::POST /jobs responde 202"
+                },
+                "POST /jobs devuelve job_id": {
+                    "fails": 0,
+                    "name": "POST /jobs devuelve job_id",
+                    "path": "::POST /jobs devuelve job_id",
+                    "id": "526858bf0fa29318312b4da3ec50035b",
+                    "passes": 181
+                },
+                "Bot sin token recibe 401": {
+                    "name": "Bot sin token recibe 401",
+                    "path": "::Bot sin token recibe 401",
+                    "id": "13f7500fc3ed61ee8ae97a10f71c93f2",
+                    "passes": 11,
+                    "fails": 0
+                },
+                "Operación inválida recibe 422": {
+                    "id": "dd6971edf6f651ee12ea03bd936cb262",
+                    "passes": 14,
+                    "fails": 0,
+                    "name": "Operación inválida recibe 422",
+                    "path": "::Operación inválida recibe 422"
+                },
+                "Archivo corrupto recibe 422": {
+                    "id": "b22c811482df9b95b73cde5d17df673b",
+                    "passes": 9,
+                    "fails": 0,
+                    "name": "Archivo corrupto recibe 422",
+                    "path": "::Archivo corrupto recibe 422"
+                }
+            },
+        "name": ""
+    },
+    "metrics": {
+        "http_req_sending": {
+            "avg": 0.11063266267281098,
+            "min": 0.010187,
+            "med": 0.036228,
+            "max": 1.973741,
+            "p(90)": 0.20424860000000095,
+            "p(95)": 0.7075131999999997
+        },
+        "slo_post_ok": {
+            "passes": 181,
+            "fails": 0,
+            "thresholds": {
+                "rate>=0.95": false
+            },
+            "value": 1
+        },
+        "iteration_duration": {
+            "med": 11642.117543,
+            "max": 16927.683191,
+            "p(90)": 15676.7402352,
+            "p(95)": 15829.506912499999,
+            "avg": 9740.315452734885,
+            "min": 1009.239426
+        },
+        "http_reqs": {
+            "count": 2170,
+            "rate": 43.31427198486711
+        },
+        "vus_max": {
+            "max": 50,
+            "value": 50,
+            "min": 50
+        },
+        "http_req_connecting": {
+            "p(95)": 0,
+            "avg": 0.04254856774193549,
+            "min": 0,
+            "med": 0,
+            "max": 3.829419,
+            "p(90)": 0
+        },
+        "http_req_waiting": {
+            "med": 24.518711500000002,
+            "max": 753.146799,
+            "p(90)": 92.56400680000003,
+            "p(95)": 161.52967309999985,
+            "avg": 46.123958117972336,
+            "min": 7.726768
+        },
+        "http_req_tls_handshaking": {
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0,
+            "p(90)": 0
+        },
+        "vus": {
+            "value": 2,
+            "min": 2,
+            "max": 50
+        },
+        "invalid_requests_handled": {
+            "count": 23,
+            "rate": 0.4590913620515869
+        },
+        "iterations": {
+            "count": 215,
+            "rate": 4.2915062104822255
+        },
+        "http_req_failed": {
+            "passes": 34,
+            "fails": 2136,
+            "value": 0.01566820276497696
+        },
+        "slo_total_ok": {
+            "passes": 181,
+            "fails": 0,
+            "value": 1
+        },
+        "bot_requests_handled": {
+            "rate": 0.219565434024672,
+            "count": 11
+        },
+        "post_jobs_duration": {
+            "med": 135,
+            "max": 479,
+            "p(90)": 317,
+            "p(95)": 393,
+            "avg": 168.41436464088397,
+            "min": 52,
+            "thresholds": {
+                "p(95)<1000": false
+            }
+        },
+        "http_req_receiving": {
+            "p(90)": 2.5950284000000012,
+            "p(95)": 4.1507280999999985,
+            "avg": 1.0248350511520732,
+            "min": 0.037294,
+            "med": 0.3311615,
+            "max": 38.429491
+        },
+        "data_received": {
+            "rate": 26321.18486297364,
+            "count": 1318664
+        },
+        "slo_unexpected_errors": {
+            "passes": 0,
+            "fails": 181,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        },
+        "http_req_duration": {
+            "p(90)": 95.42575270000002,
+            "p(95)": 163.8442714,
+            "avg": 47.25942583179724,
+            "min": 8.104584,
+            "med": 25.402919500000003,
+            "max": 753.669821
+        },
+        "http_req_blocked": {
+            "min": 0.003891,
+            "med": 0.0108675,
+            "max": 5.577083,
+            "p(90)": 0.01933110000000001,
+            "p(95)": 0.04102194999999998,
+            "avg": 0.060990915207373236
+        },
+        "job_total_duration": {
+            "max": 15928,
+            "p(90)": 14979,
+            "p(95)": 15468,
+            "avg": 10709.237569060773,
+            "min": 445,
+            "med": 11519
+        },
+        "data_sent": {
+            "count": 211711588,
+            "rate": 4225867.882479321
+        },
+        "checks": {
+            "passes": 396,
+            "fails": 0,
+            "value": 1
+        },
+        "http_req_duration{expected_response:true}": {
+            "max": 753.669821,
+            "p(90)": 93.521154,
+            "p(95)": 163.244779,
+            "avg": 46.89102891853933,
+            "min": 9.24941,
+            "med": 25.3612215
+        }
+    }
+}
