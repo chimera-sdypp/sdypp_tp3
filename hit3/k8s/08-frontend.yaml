@@ -77,14 +77,14 @@ spec:
       containers:
         - name: frontend
           # Imagen Docker empaquetada con FastAPI, uvicorn y los archivos estáticos
-          image: ghcr.io/chimera-sdypp/sobel-frontend:1.0.0
+          image: ghcr.io/chimera-sdypp/sobel-frontend:1.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
           # Variables de entorno inyectadas al contenedor:
           env:
-            # 1. Conexión a RabbitMQ (requerida por la imagen 1.0.0; en la nueva versión es opcional)
+            # 1. Conexión a RabbitMQ: opcional; sólo se usa si el frontend escucha el fanout (por defecto lee el avance de Redis)
             - name: RABBITMQ_URL
               valueFrom:
                 secretKeyRef:

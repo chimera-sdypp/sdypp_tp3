@@ -87,7 +87,7 @@ const RAMP_UP = __ENV.RAMP_UP || '5s';
 const POLL_JOB = __ENV.POLL_JOB !== 'false';
 
 // Referencia de la imagen OCI del worker a utilizar en el pipeline (según Contrato Sección 4).
-const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.0.0';
+const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.1.0';
 
 
 // ==============================================================================
