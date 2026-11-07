@@ -70,7 +70,7 @@ spec:
 
       containers:
         - name: split
-          image: ghcr.io/chimera-sdypp/sobel-split:1.0.0
+          image: ghcr.io/chimera-sdypp/sobel-split:1.1.0
           imagePullPolicy: IfNotPresent # Solo descarga la imagen si no está en la caché del nodo
           ports:
             - name: http
@@ -96,9 +96,9 @@ spec:
             - name: SOBEL_PUERTO
               value: "8080"
 
-            # SOBEL_PARTES: en la imagen 1.0.0 requiere >= 1. Para la nueva versión soporta 0 (dinámico).
+            # SOBEL_PARTES: 0 = partes dinámicas según tamaño, workers vivos, archivos y cola; N > 0 las fija.
             - name: SOBEL_PARTES
-              value: "4"
+              value: "0"
 
             # Cantidad máxima de reintentos antes de mandar a la DLQ si el split crashea con un mensaje
             - name: SOBEL_LIMITE_ENTREGAS

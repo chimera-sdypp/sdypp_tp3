@@ -39,7 +39,7 @@ URL="${1:-http://localhost}"
 NS="${SOBEL_NAMESPACE:-sobel}"
 
 # Imagen de contenedor del worker esperado para procesar las tareas de Sobel
-IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.0.0}"
+IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.1.0}"
 
 mensajes_agotados() {
   kubectl -n "$NS" exec rabbitmq-0 -c rabbitmq -- rabbitmqctl list_queues name messages --silent \

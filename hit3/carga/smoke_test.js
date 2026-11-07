@@ -53,7 +53,7 @@ export const options = {
 const BASE_URL = __ENV.TARGET_URL || 'http://localhost';
 
 // Referencia de imagen OCI para workers (estipulada en la Sección 4 del Contrato)
-const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.0.0';
+const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.1.0';
 
 // ==============================================================================
 // Precarga de Datos de Prueba en Memoria

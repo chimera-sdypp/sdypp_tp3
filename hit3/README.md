@@ -8,8 +8,8 @@ kubectl apply -k hit3/k8s/
 
 TOKEN=$(kubectl -n sobel exec deploy/backend -- python -m backend.emitir_token ana usuario)
 curl -s -X POST http://localhost/jobs -H "Authorization: Bearer $TOKEN" -F archivos=@gato.png \
-  -F 'operaciones=[{"operacion":"grises","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.0.0"},
-                   {"operacion":"sobel","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.0.0"}]'
+  -F 'operaciones=[{"operacion":"grises","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.0"},
+                   {"operacion":"sobel","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.0"}]'
 curl -s http://localhost/jobs/<job_id> -H "Authorization: Bearer $TOKEN"
 ```
 
