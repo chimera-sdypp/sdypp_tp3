@@ -41,6 +41,11 @@ NS="${SOBEL_NAMESPACE:-sobel}"
 # Imagen de contenedor del worker esperado para procesar las tareas de Sobel
 IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.0.0}"
 
+mensajes_agotados() {
+  kubectl -n "$NS" exec rabbitmq-0 -c rabbitmq -- rabbitmqctl list_queues name messages --silent \
+    | awk '$1=="sobel.dlq.agotados"{print $2}'
+}
+
 # Generamos una marca de tiempo única para aislar este caso de prueba de cualquier otro
 TIMESTAMP=$(date +%s)
 JOB_ID="job-corrupto-$TIMESTAMP"
@@ -177,9 +182,14 @@ echo
 # Validamos directamente en RabbitMQ que el mensaje esté esperando en la cola de agotados.
 # Esta métrica activa la regla de alerta SobelDLQAgotadosPresentes en Prometheus.
 amarillo "5. Verificando cola 'sobel.dlq.agotados' en RabbitMQ..."
-MENSAJES_AGOTADOS=$(kubectl -n "$NS" exec rabbitmq-0 -- rabbitmqctl list_queues name messages --silent | awk '$1=="sobel.dlq.agotados"{print $2}')
+# El conteo de una cola quorum se actualiza un instante después de la publicación: se reintenta hasta 10 s.
+for _ in $(seq 10); do
+  MENSAJES_AGOTADOS=$(mensajes_agotados)
+  [ "${MENSAJES_AGOTADOS:-0}" -ge 1 ] && break
+  sleep 1
+done
 echo "   Mensajes acumulados en sobel.dlq.agotados: $MENSAJES_AGOTADOS"
-if [ "$MENSAJES_AGOTADOS" -ge 1 ]; then
+if [ "${MENSAJES_AGOTADOS:-0}" -ge 1 ]; then
   verde "   Condición de alerta 'SobelDLQAgotadosPresentes' CUMPLIDA (rabbitmq_queue_messages > 0)."
 else
   rojo "   ERROR: sobel.dlq.agotados no tiene mensajes."
@@ -230,9 +240,13 @@ sleep 3
 # PASO 9: Verificación de vaciado de la Dead Letter Queue
 # ----------------------------------------------------------------------------------------
 amarillo "9. Verificando que la cola 'sobel.dlq.agotados' haya sido vaciada..."
-MENSAJES_RESTANTES=$(kubectl -n "$NS" exec rabbitmq-0 -- rabbitmqctl list_queues name messages --silent | awk '$1=="sobel.dlq.agotados"{print $2}')
+for _ in $(seq 10); do
+  MENSAJES_RESTANTES=$(mensajes_agotados)
+  [ "${MENSAJES_RESTANTES:-0}" -eq 0 ] && break
+  sleep 1
+done
 echo "   Mensajes restantes en sobel.dlq.agotados: $MENSAJES_RESTANTES"
-if [ "$MENSAJES_RESTANTES" -eq 0 ]; then
+if [ "${MENSAJES_RESTANTES:-0}" -eq 0 ]; then
   verde "   La cola sobel.dlq.agotados quedó limpia (0 mensajes)."
 else
   rojo "   ADVERTENCIA: Aún quedan mensajes en sobel.dlq.agotados ($MENSAJES_RESTANTES)."

@@ -27,6 +27,7 @@
 # -e: Finaliza inmediatamente si algún comando produce un código de salida distinto de cero.
 # -u: Trata las variables no declaradas o vacías como un error fatal.
 # -o pipefail: Hace que el código de retorno de una tubería sea el del último comando que falló.
+export LC_NUMERIC=C  # printf con decimales: con locale en español esperaría coma
 set -euo pipefail
 
 # Resolución de rutas absolutas del script y del directorio raíz del repositorio

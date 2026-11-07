@@ -1,0 +1,156 @@
+==========================================================================
+  PRUEBA AUTOMATIZADA DE FALLOS, REINTENTOS Y RECUPERACIÓN DLQ
+==========================================================================
+
+1. Generando tokens JWT para usuario (ana) y administrador (root)...
+   Tokens generados exitosamente.
+
+2. Inyectando tarea con datos corruptos (matriz inválida) para 'job-corrupto-1794064167'...
+   Tarea corrupta inyectada en RabbitMQ.
+
+3. Esperando que el worker falle y el reasignador ejecute los reintentos...
+
+--- Evidencia en logs del Reasignador (sobel.dlq -> reintentos -> agotados) ---
+2026-11-07 15:09:30,098 | INFO | job job-corrupto-1794064167: archivo 0, fragmento 0, paso 0 (rejected): intento 2
+2026-11-07 15:09:30,113 | INFO | job job-corrupto-1794064167: archivo 0, fragmento 0, paso 0 (rejected): intento 3
+2026-11-07 15:09:30,126 | INFO | job job-corrupto-1794064167: archivo 0, fragmento 0, paso 0 (rejected): intento 4
+2026-11-07 15:09:30,141 | WARNING | job job-corrupto-1794064167: el fragmento 0 del archivo 0 agotó los reintentos en el paso 0 (rejected), va a sobel.dlq.agotados
+
+4. Consultando el estado del job vía API pública (GET /jobs/job-corrupto-1794064167)...
+{
+    "codigo": 200,
+    "contenido": {
+        "job_id": "job-corrupto-1794064167",
+        "usuario": "ana",
+        "estado": "dlq",
+        "creado": "2026-11-07T15:09:30Z",
+        "terminado": "2026-11-07T15:09:30Z",
+        "archivos": 1,
+        "operaciones": [
+            {
+                "operacion": "sobel",
+                "imagen": "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
+            }
+        ],
+        "fragmentos": {
+            "total": 1,
+            "completos": 0,
+            "porcentaje": 0.0,
+            "en_dlq": 1
+        },
+        "tiempos_s": {
+            "split": null,
+            "cola": null,
+            "procesamiento": null,
+            "join": null,
+            "total": 0.094
+        },
+        "workers": [],
+        "reintentos": 3,
+        "resultados": [],
+        "error": {
+            "tipo": "REINTENTOS_AGOTADOS",
+            "mensaje": "la tarea de sobel del fragmento 0 del archivo 0 agot\u00f3 los reintentos (rejected)"
+        }
+    }
+}
+
+   Job pasó correctamente a estado 'dlq' con 3 reintentos y 1 en DLQ.
+
+5. Verificando cola 'sobel.dlq.agotados' en RabbitMQ...
+   Mensajes acumulados en sobel.dlq.agotados: 1
+   Condición de alerta 'SobelDLQAgotadosPresentes' CUMPLIDA (rabbitmq_queue_messages > 0).
+
+6. Verificando métricas desde la API de administración (GET /stats)...
+{
+    "codigo": 200,
+    "contenido": {
+        "jobs": {
+            "queued": 0,
+            "processing": 0,
+            "done": 6,
+            "failed": 0,
+            "dlq": 0
+        },
+        "colas": {
+            "sobel.split": 0,
+            "sobel.joiner": 0,
+            "sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0": 0
+        },
+        "dlq": {
+            "fallidos": 0,
+            "agotados": 1
+        },
+        "workers_activos": 2,
+        "latencia_s": {
+            "p50": 0.097,
+            "p95": 7.182,
+            "p99": 7.182,
+            "muestras": 8
+        },
+        "tasa_error": 0.25
+    }
+}
+
+7. Reparando los datos en Redis para permitir recuperación exitosa...
+   Fragmento corregido con imagen PNG válida en Redis.
+
+8. Ejecutando reprocesamiento de administrador (POST /admin/dlq/reprocesar)...
+{
+    "codigo": 200,
+    "contenido": {
+        "reprocesados": 1,
+        "jobs": [
+            "job-corrupto-1794064167"
+        ]
+    }
+}
+
+9. Verificando que la cola 'sobel.dlq.agotados' haya sido vaciada...
+   Mensajes restantes en sobel.dlq.agotados: 0
+   La cola sobel.dlq.agotados quedó limpia (0 mensajes).
+
+10. Consultando estado final del job reparado (GET /jobs/job-corrupto-1794064167)...
+{
+    "codigo": 200,
+    "contenido": {
+        "job_id": "job-corrupto-1794064167",
+        "usuario": "ana",
+        "estado": "done",
+        "creado": "2026-11-07T15:09:30Z",
+        "terminado": "2026-11-07T15:09:34Z",
+        "archivos": 1,
+        "operaciones": [
+            {
+                "operacion": "sobel",
+                "imagen": "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
+            }
+        ],
+        "fragmentos": {
+            "total": 1,
+            "completos": 1,
+            "porcentaje": 100.0,
+            "en_dlq": 0
+        },
+        "tiempos_s": {
+            "split": null,
+            "cola": 0.008,
+            "procesamiento": 0.0,
+            "join": 0.001,
+            "total": 4.702
+        },
+        "workers": [
+            "sobel-worker-758687df7d-zzv9k"
+        ],
+        "reintentos": 3,
+        "resultados": [
+            "/jobs/job-corrupto-1794064167/resultado/0"
+        ],
+        "error": null
+    }
+}
+   Job procesado y finalizado exitosamente (Estado: done).
+
+==========================================================================
+  PRUEBA DE CICLO COMPLETO DE DLQ FINALIZADA CON ÉXITO
+==========================================================================
