@@ -107,25 +107,44 @@ def test_ofertas_sin_redis_es_503(cliente, redis, monkeypatch):
     assert respuesta.json()["contenido"]["error"]["tipo"] == "SERVICIO_NO_DISPONIBLE"
 
 
-def test_health(cliente, monkeypatch):
-    monkeypatch.setattr(conexion, "estado", {})
-    respuesta = cliente.get("/health")
-    assert respuesta.status_code == 503
-    assert respuesta.json() == {"frontend": "ok", "rabbitmq": "caido", "redis": "ok"}
-    monkeypatch.setattr(conexion, "estado", {"rabbitmq": "ok"})
+def test_health(cliente, redis, monkeypatch):
     assert cliente.get("/health").status_code == 200
+    assert cliente.get("/health").json() == {"frontend": "ok", "redis": "ok"}
+    monkeypatch.setattr(redis, "ping", lambda: False)
+    assert cliente.get("/health").status_code == 503
+    assert cliente.get("/health").json() == {"frontend": "ok", "redis": "caido"}
+
+
+def test_health_con_escucha_de_rabbitmq(backend, redis, difusor, tmp_path, monkeypatch):
+    monkeypatch.setenv("SOBEL_LOGS", str(tmp_path))
+    monkeypatch.setattr(conexion, "estado", {})
+    from fastapi.testclient import TestClient
+    app = crear_app({"BACKEND_URL": backend.url, "REDIS_URL": "redis://x", "RABBITMQ_URL": "amqp://x"},
+                    redis, difusor, escuchar=True)
+    with TestClient(app) as cliente_escucha:
+        assert cliente_escucha.get("/health").status_code == 503
+        assert cliente_escucha.get("/health").json() == {"frontend": "ok", "redis": "ok", "rabbitmq": "caido"}
+        monkeypatch.setattr(conexion, "estado", {"rabbitmq": "ok"})
+        assert cliente_escucha.get("/health").status_code == 200
 
 
 def test_metrics(cliente):
     assert "sobel_frontend_navegadores" in cliente.get("/metrics").text
 
 
-@pytest.mark.parametrize("falta", ["BACKEND_URL", "REDIS_URL", "RABBITMQ_URL"])
+@pytest.mark.parametrize("falta", ["BACKEND_URL", "REDIS_URL"])
 def test_no_arranca_sin_configuracion(falta, tmp_path, monkeypatch):
     monkeypatch.setenv("SOBEL_LOGS", str(tmp_path))
-    entorno = {"BACKEND_URL": "http://backend:8080", "REDIS_URL": "redis://x", "RABBITMQ_URL": "amqp://x"}
+    entorno = {"BACKEND_URL": "http://backend:8080", "REDIS_URL": "redis://x"}
     with pytest.raises(ValueError, match=falta):
         crear_app(entorno | {falta: ""})
+
+
+def test_no_arranca_sin_rabbitmq_si_debe_escuchar(tmp_path, monkeypatch):
+    monkeypatch.setenv("SOBEL_LOGS", str(tmp_path))
+    entorno = {"BACKEND_URL": "http://backend:8080", "REDIS_URL": "redis://x", "RABBITMQ_URL": ""}
+    with pytest.raises(ValueError, match="RABBITMQ_URL"):
+        crear_app(entorno, escuchar=True)
 
 
 def test_un_navegador_lento_no_frena_a_los_demas():
@@ -143,3 +162,26 @@ def test_un_navegador_lento_no_frena_a_los_demas():
         await asyncio.sleep(0)
         assert rapido.get_nowait()["fragmento"] == "nuevo"
     asyncio.run(probar())
+
+
+def test_eventos_transmite_avance_directo_desde_redis(cliente, redis):
+    redis.hset("job:j1", mapping={"estado": "processing", "fragmentos_total": "4", "completos": "1"})
+    with cliente.stream("GET", "/eventos/j1", headers=TOKEN) as respuesta:
+        assert respuesta.status_code == 200
+        for linea in respuesta.iter_lines():
+            if linea.startswith("data: "):
+                datos = json.loads(linea[6:])
+                assert datos["job_id"] == "j1"
+                assert datos["completos"] == 1
+                assert datos["total"] == 4
+                assert datos["porcentaje"] == 25
+                break
+
+
+def test_eventos_cierra_cuando_job_llega_a_done(cliente, redis):
+    redis.hset("job:j1", mapping={"estado": "done", "fragmentos_total": "2", "completos": "2"})
+    with cliente.stream("GET", "/eventos/j1", headers=TOKEN) as respuesta:
+        eventos = [json.loads(l[6:]) for l in respuesta.iter_lines() if l.startswith("data: ")]
+        assert len(eventos) == 1
+        assert eventos[0]["estado"] == "done"
+

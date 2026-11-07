@@ -236,9 +236,9 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 | `sobel.dlx` | exchange direct | lo usa RabbitMQ al descartar un mensaje |
 | `sobel.dlq` | cola quorum, atada a `sobel.dlx` | RabbitMQ → reasignador |
 | `sobel.dlq.agotados` | cola quorum | reasignador → backend (al reprocesar) |
-| `sobel.resultados` | exchange fanout | worker (último paso) → joiner y frontend |
+| `sobel.resultados` | exchange fanout | worker (último paso) → joiner (y el frontend sólo si corre con `escuchar=True`) |
 | `sobel.joiner` | cola quorum, atada a `sobel.resultados`, con DLX `sobel.dlx`, routing key `sobel.dlq` y `x-delivery-limit` | → joiner (compiten las réplicas) |
-| (sin nombre) | cola exclusiva, atada a `sobel.resultados` (`colas.declarar_exclusiva`) | → frontend; una por réplica, se borra sola |
+| (sin nombre) | cola exclusiva, atada a `sobel.resultados` (`colas.declarar_exclusiva`) | → frontend, sólo con `escuchar=True` (por defecto lee el avance de Redis); una por réplica, se borra sola |
 
 - `<imagen>` es la referencia completa de la imagen (`sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0`).
 - Todos declaran con `hit3/comun/colas.py` y el mismo `SOBEL_LIMITE_ENTREGAS`: si una cola ya existe con otros
@@ -423,8 +423,8 @@ además sus rutas). Imágenes privadas: `ghcr.io/chimera-sdypp/sobel-<servicio>:
 
 El ingress manda `/jobs`, `/stats`, `/admin` y `/health` al backend y el resto al frontend, así la página llama a la
 API en el mismo host. Rutas del frontend: `GET /` (la página), `GET /ofertas` (`{imagen: [operaciones]}` de los
-`worker:<id>`) y `GET /eventos/{id}`, que manda por Server-Sent Events cada resultado de ese job que llega a
-`sobel.resultados`. `/eventos` pide el mismo token que la API: el frontend se lo reenvía al backend en un
+`worker:<id>`) y `GET /eventos/{id}`, que manda por Server-Sent Events el avance de ese job leído de Redis
+(`{job_id, estado, completos, total, porcentaje}`, cada vez que cambia) y se cierra cuando llega a `done` o `failed`. `/eventos` pide el mismo token que la API: el frontend se lo reenvía al backend en un
 `GET /jobs/{id}` y, si no da `200`, devuelve esa misma respuesta.
 
 El `/health` de cada servicio devuelve `{"<servicio>": "ok", "rabbitmq": "ok", "redis": "ok"}`: `200`, o `503` si alguna

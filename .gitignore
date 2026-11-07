@@ -66,6 +66,8 @@ TP3-P2*
 *.docx
 CONTEXTO*
 contexto*
+GUIA_DESPLIEGUE_KUBERNETES.md
+*gcp.sh
 
 # Test data & load test artifacts
 hit3/carga/datos/
