@@ -1,0 +1,58 @@
+# Hit #3 en el GKE compartido (proyecto tp3distribuidos, cluster tp3): namespace propio, los nodos con las
+# etiquetas del cluster (pool=infra / pool=apps) y el ingress de GKE, porque no hay traefik.
+#   kubectl create namespace chimera-sobel
+#   SOBEL_NAMESPACE=chimera-sobel GHCR_USER=<usuario> GHCR_PAT=<token read:packages> hit3/k8s/crear_secretos.sh
+#   kubectl apply -k hit3/k8s-gke
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: chimera-sobel
+resources:
+  - ../k8s
+images:
+  - {name: ghcr.io/chimera-sdypp/sobel-backend, newTag: sha-7d4d1cd}
+  - {name: ghcr.io/chimera-sdypp/sobel-frontend, newTag: sha-7d4d1cd}
+  - {name: ghcr.io/chimera-sdypp/sobel-split, newTag: sha-7d4d1cd}
+  - {name: ghcr.io/chimera-sdypp/sobel-worker, newTag: sha-7d4d1cd}
+  - {name: ghcr.io/chimera-sdypp/sobel-joiner, newTag: sha-7d4d1cd}
+  - {name: ghcr.io/chimera-sdypp/sobel-reasignador, newTag: sha-7d4d1cd}
+patches:
+  - target: {kind: Namespace}
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: chimera-sobel
+  - target: {kind: Deployment}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/nodeSelector
+        value: {pool: apps}
+      - op: remove
+        path: /spec/template/spec/tolerations
+  - target: {kind: StatefulSet}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/nodeSelector
+        value: {pool: infra}
+      - op: remove
+        path: /spec/template/spec/tolerations
+  - target: {kind: StatefulSet, name: rabbitmq}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/env/2/value
+        value: "rabbit@$(HOSTNAME).rabbitmq-nodes.chimera-sobel.svc.cluster.local"
+  - target: {kind: ConfigMap, name: rabbitmq-config}
+    patch: |-
+      - op: replace
+        path: /data/rabbitmq.conf
+        value: |
+          cluster_formation.peer_discovery_backend = classic_config
+          cluster_formation.classic_config.nodes.1 = rabbit@rabbitmq-0.rabbitmq-nodes.chimera-sobel.svc.cluster.local
+          cluster_formation.classic_config.nodes.2 = rabbit@rabbitmq-1.rabbitmq-nodes.chimera-sobel.svc.cluster.local
+          cluster_formation.classic_config.nodes.3 = rabbit@rabbitmq-2.rabbitmq-nodes.chimera-sobel.svc.cluster.local
+          cluster_partition_handling = autoheal
+          queue_leader_locator = balanced
+  - target: {kind: Ingress}
+    patch: |-
+      - op: replace
+        path: /metadata/annotations
+        value: {kubernetes.io/ingress.class: gce}
