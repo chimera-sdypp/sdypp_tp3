@@ -1,0 +1,86 @@
+terraform init -backend-config="bucket=chimera-tp3-tfstate"
+shell: /usr/bin/bash -e {0}
+env:
+  TF_IN_AUTOMATION: 1
+  TF_INPUT: 0
+  TF_VAR_proyecto: chimera-tp3
+  TF_VAR_imagen: southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0
+  TF_VAR_ip_permitida: <IP de la casa>/32
+  TF_VAR_imagen_worker: 
+  CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-daf7040af0be0f81.json
+  GOOGLE_APPLICATION_CREDENTIALS: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-daf7040af0be0f81.json
+  GOOGLE_GHA_CREDS_PATH: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-daf7040af0be0f81.json
+  CLOUDSDK_CORE_PROJECT: chimera-tp3
+  CLOUDSDK_PROJECT: chimera-tp3
+  GCLOUD_PROJECT: chimera-tp3
+  GCP_PROJECT: chimera-tp3
+  GOOGLE_CLOUD_PROJECT: chimera-tp3
+  TERRAFORM_CLI_PATH: /home/runner/work/_temp/f8f90dc3-449f-4854-9b3a-873d04fae940
+Initializing the backend...
+
+Successfully configured the backend "gcs"! Terraform will automatically
+use this backend unless the backend configuration changes.
+Initializing provider plugins...
+- Reusing previous version of hashicorp/google from the dependency lock file
+- Installing hashicorp/google v6.50.0...
+- Installed hashicorp/google v6.50.0 (signed by HashiCorp)
+
+Terraform has been successfully initialized!
+terraform plan -lock-timeout=5m
+shell: /usr/bin/bash -e {0}
+env:
+  TF_IN_AUTOMATION: 1
+  TF_INPUT: 0
+  TF_VAR_proyecto: chimera-tp3
+  TF_VAR_imagen: southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0
+  TF_VAR_ip_permitida: <IP de la casa>/32
+  TF_VAR_imagen_worker: 
+  CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-daf7040af0be0f81.json
+  GOOGLE_APPLICATION_CREDENTIALS: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-daf7040af0be0f81.json
+  GOOGLE_GHA_CREDS_PATH: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-daf7040af0be0f81.json
+  CLOUDSDK_CORE_PROJECT: chimera-tp3
+  CLOUDSDK_PROJECT: chimera-tp3
+  GCLOUD_PROJECT: chimera-tp3
+  GCP_PROJECT: chimera-tp3
+  GOOGLE_CLOUD_PROJECT: chimera-tp3
+  TERRAFORM_CLI_PATH: /home/runner/work/_temp/f8f90dc3-449f-4854-9b3a-873d04fae940
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  ~ update in-place
+
+Terraform will perform the following actions:
+
+  # google_compute_firewall.worker will be updated in-place
+  ~ resource "google_compute_firewall" "worker" {
+        id                      = "projects/chimera-tp3/global/firewalls/sobel-hit2-worker"
+        name                    = "sobel-hit2-worker"
+      ~ source_ranges           = [
+          - "<IP de la casa>/32",
+          + "<IP de la casa>/32",
+        ]
+        # (13 unchanged attributes hidden)
+
+        # (1 unchanged block hidden)
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+
+Removed exported credentials at "/home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-daf7040af0be0f81.json".
+[command]/usr/bin/git version
+git version 2.56.0
+Temporarily overriding HOME='/home/runner/work/_temp/5ecd9b6b-e208-48ce-847b-317c7696df4b' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+[command]/usr/bin/git config --global --add safe.directory /home/runner/work/sdypp_tp3/sdypp_tp3
+[command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+[command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+[command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+http.https://github.com/.extraheader
+[command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+[command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+[command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+[command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, google-github-actions/auth@v2, hashicorp/setup-terraform@v3. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
