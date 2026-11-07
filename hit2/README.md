@@ -87,3 +87,10 @@ final quedaron 0 VMs.
 Las VMs no rinden siempre igual: Y y Z están en el medio de lo medido, así la cola tarda decenas de minutos en llegar
 a otro umbral. La versión anterior, que procesaba una sola imagen con N VMs (`desbordar.sh`), quedó en el tag
 [`v1.0.0`](https://github.com/chimera-sdypp/sdypp_tp3/tree/v1.0.0/hit2), y sus mediciones están en el informe.
+
+## Evidencia de Terraform
+
+En [`evidencia/`](evidencia/):
+
+- `corridas-gcp-28-10.log`: las 4 corridas en GCP de la versión anterior (`desbordar.sh`), con el `plan` y el `apply` que crea las VMs; al final, el teardown es otro `apply` con `cantidad=0` (su salida no se guardaba, sólo la línea «teardown: borrando las VMs»). El resumen está en `resumen-gcp-28-10.md` y la línea de base local en `resumen-local.md`.
+- `plan-ci-hit2-29-10.log` y `plan-ci-hit3-29-10.log`: el `init` contra el state remoto (bucket `chimera-tp3-tfstate`) y el `plan` que corre el CI en cada PR, autenticado por Workload Identity.

@@ -1,0 +1,1040 @@
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # google_compute_instance.worker[0] will be created
+  + resource "google_compute_instance" "worker" {
+      + can_ip_forward       = false
+      + cpu_platform         = (known after apply)
+      + creation_timestamp   = (known after apply)
+      + current_status       = (known after apply)
+      + deletion_protection  = false
+      + effective_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + id                   = (known after apply)
+      + instance_id          = (known after apply)
+      + label_fingerprint    = (known after apply)
+      + machine_type         = "e2-standard-2"
+      + metadata             = {
+          + "enable-oslogin" = "TRUE"
+          + "startup-script" = <<-EOT
+                #!/bin/bash
+                # Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+                set -euo pipefail
+                if ! command -v docker >/dev/null; then
+                  apt-get update -q
+                  apt-get install -y -q docker.io
+                fi
+                # La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
+                gcloud auth configure-docker "southamerica-east1-docker.pkg.dev" --quiet
+                docker pull "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+                docker rm -f worker 2>/dev/null || true
+                docker run -d --name worker --restart unless-stopped -p 8080:8080 "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+            EOT
+        }
+      + metadata_fingerprint = (known after apply)
+      + min_cpu_platform     = (known after apply)
+      + name                 = "sobel-hit2-worker-0"
+      + project              = "chimera-tp3"
+      + self_link            = (known after apply)
+      + tags                 = [
+          + "sobel-hit2-worker",
+        ]
+      + tags_fingerprint     = (known after apply)
+      + terraform_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + zone                 = "southamerica-east1-a"
+
+      + boot_disk {
+          + auto_delete                = true
+          + device_name                = (known after apply)
+          + disk_encryption_key_sha256 = (known after apply)
+          + guest_os_features          = (known after apply)
+          + kms_key_self_link          = (known after apply)
+          + mode                       = "READ_WRITE"
+          + source                     = (known after apply)
+
+          + initialize_params {
+              + architecture           = (known after apply)
+              + image                  = "debian-cloud/debian-12"
+              + labels                 = (known after apply)
+              + provisioned_iops       = (known after apply)
+              + provisioned_throughput = (known after apply)
+              + resource_policies      = (known after apply)
+              + size                   = 10
+              + snapshot               = (known after apply)
+              + type                   = (known after apply)
+            }
+        }
+
+      + confidential_instance_config (known after apply)
+
+      + guest_accelerator (known after apply)
+
+      + network_interface {
+          + internal_ipv6_prefix_length = (known after apply)
+          + ipv6_access_type            = (known after apply)
+          + ipv6_address                = (known after apply)
+          + name                        = (known after apply)
+          + network                     = "default"
+          + network_attachment          = (known after apply)
+          + network_ip                  = (known after apply)
+          + stack_type                  = (known after apply)
+          + subnetwork                  = (known after apply)
+          + subnetwork_project          = (known after apply)
+
+          + access_config {
+              + nat_ip       = (known after apply)
+              + network_tier = (known after apply)
+            }
+        }
+
+      + reservation_affinity (known after apply)
+
+      + scheduling (known after apply)
+
+      + service_account {
+          + email  = "sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com"
+          + scopes = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        }
+
+      + shielded_instance_config {
+          + enable_integrity_monitoring = true
+          + enable_secure_boot          = true
+          + enable_vtpm                 = true
+        }
+    }
+
+  # google_compute_instance.worker[1] will be created
+  + resource "google_compute_instance" "worker" {
+      + can_ip_forward       = false
+      + cpu_platform         = (known after apply)
+      + creation_timestamp   = (known after apply)
+      + current_status       = (known after apply)
+      + deletion_protection  = false
+      + effective_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + id                   = (known after apply)
+      + instance_id          = (known after apply)
+      + label_fingerprint    = (known after apply)
+      + machine_type         = "e2-standard-2"
+      + metadata             = {
+          + "enable-oslogin" = "TRUE"
+          + "startup-script" = <<-EOT
+                #!/bin/bash
+                # Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+                set -euo pipefail
+                if ! command -v docker >/dev/null; then
+                  apt-get update -q
+                  apt-get install -y -q docker.io
+                fi
+                # La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
+                gcloud auth configure-docker "southamerica-east1-docker.pkg.dev" --quiet
+                docker pull "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+                docker rm -f worker 2>/dev/null || true
+                docker run -d --name worker --restart unless-stopped -p 8080:8080 "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+            EOT
+        }
+      + metadata_fingerprint = (known after apply)
+      + min_cpu_platform     = (known after apply)
+      + name                 = "sobel-hit2-worker-1"
+      + project              = "chimera-tp3"
+      + self_link            = (known after apply)
+      + tags                 = [
+          + "sobel-hit2-worker",
+        ]
+      + tags_fingerprint     = (known after apply)
+      + terraform_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + zone                 = "southamerica-east1-a"
+
+      + boot_disk {
+          + auto_delete                = true
+          + device_name                = (known after apply)
+          + disk_encryption_key_sha256 = (known after apply)
+          + guest_os_features          = (known after apply)
+          + kms_key_self_link          = (known after apply)
+          + mode                       = "READ_WRITE"
+          + source                     = (known after apply)
+
+          + initialize_params {
+              + architecture           = (known after apply)
+              + image                  = "debian-cloud/debian-12"
+              + labels                 = (known after apply)
+              + provisioned_iops       = (known after apply)
+              + provisioned_throughput = (known after apply)
+              + resource_policies      = (known after apply)
+              + size                   = 10
+              + snapshot               = (known after apply)
+              + type                   = (known after apply)
+            }
+        }
+
+      + confidential_instance_config (known after apply)
+
+      + guest_accelerator (known after apply)
+
+      + network_interface {
+          + internal_ipv6_prefix_length = (known after apply)
+          + ipv6_access_type            = (known after apply)
+          + ipv6_address                = (known after apply)
+          + name                        = (known after apply)
+          + network                     = "default"
+          + network_attachment          = (known after apply)
+          + network_ip                  = (known after apply)
+          + stack_type                  = (known after apply)
+          + subnetwork                  = (known after apply)
+          + subnetwork_project          = (known after apply)
+
+          + access_config {
+              + nat_ip       = (known after apply)
+              + network_tier = (known after apply)
+            }
+        }
+
+      + reservation_affinity (known after apply)
+
+      + scheduling (known after apply)
+
+      + service_account {
+          + email  = "sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com"
+          + scopes = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        }
+
+      + shielded_instance_config {
+          + enable_integrity_monitoring = true
+          + enable_secure_boot          = true
+          + enable_vtpm                 = true
+        }
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  ~ ips     = [
+      + (known after apply),
+      + (known after apply),
+    ]
+  ~ workers = null -> (known after apply)
+google_compute_instance.worker[1]: Creating...
+google_compute_instance.worker[0]: Creating...
+google_compute_instance.worker[0]: Still creating... [00m10s elapsed]
+google_compute_instance.worker[1]: Still creating... [00m10s elapsed]
+google_compute_instance.worker[0]: Still creating... [00m20s elapsed]
+google_compute_instance.worker[1]: Still creating... [00m20s elapsed]
+google_compute_instance.worker[1]: Still creating... [00m30s elapsed]
+google_compute_instance.worker[0]: Still creating... [00m30s elapsed]
+google_compute_instance.worker[1]: Creation complete after 31s [id=projects/chimera-tp3/zones/southamerica-east1-a/instances/sobel-hit2-worker-1]
+google_compute_instance.worker[0]: Creation complete after 37s [id=projects/chimera-tp3/zones/southamerica-east1-a/instances/sobel-hit2-worker-0]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+ips = [
+  "34.39.241.144",
+  "34.151.250.6",
+]
+workers = "34.39.241.144:8080,34.151.250.6:8080"
+VMs listas en 140 s: 34.39.241.144:8080,34.151.250.6:8080
+time="2026-10-28T15:21:00-03:00" level=warning msg="buildx Docker CLI plugin not found: falling back to the classic builder. BuildKit-only build features (multi-arch, secrets, ssh, additional contexts, ...) will not be available"
+ Image sobel-hit1:local Building 
+ Image sobel-hit1:local Building 
+Sending build context to Docker daemon   10.9kB
+Step 1/11 : FROM python:3.14-slim
+ ---> a2b82f3c4855
+Step 2/11 : ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ ---> Using cache
+ ---> daff50881496
+Step 3/11 : WORKDIR /app
+ ---> Using cache
+ ---> 92c32117f700
+Step 4/11 : COPY requirements.txt .
+ ---> Using cache
+ ---> 002e63267fbf
+Step 5/11 : RUN pip install --no-cache-dir -r requirements.txt
+ ---> Using cache
+ ---> a703076fb443
+Step 6/11 : RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin sobel     && mkdir logs && chown sobel logs
+ ---> Using cache
+ ---> 03273cefea58
+Step 7/11 : COPY *.py ./
+ ---> Using cache
+ ---> e9af6529cd11
+Step 8/11 : USER sobel
+ ---> Using cache
+ ---> cd2f75c78f5b
+Step 9/11 : EXPOSE 8080
+ ---> Using cache
+ ---> cece4ac91c00
+Step 10/11 : CMD ["python", "worker.py"]
+ ---> Using cache
+ ---> 26230f5b0641
+Step 11/11 : LABEL com.docker.compose.image.builder=classic
+ ---> Using cache
+ ---> ef18d4a8a47d
+Successfully built ef18d4a8a47d
+Successfully tagged sobel-hit1:local
+ Image sobel-hit1:local Built 
+ Image sobel-hit1:local Built 
+ Network hit1_default Creating 
+ Network hit1_default Creating 
+ Network hit1_default Created 
+ Network hit1_default Created 
+ Container hit1-worker-1 Creating 
+ Container hit1-worker-1 Created 
+ Container hit1-worker-1 Starting 
+ Container hit1-worker-1 Started 
+ Container hit1-worker-1 Waiting 
+ Container hit1-worker-1 Healthy 
+ Container hit1-master-run-bf553769b6b9 Creating 
+ Container hit1-master-run-bf553769b6b9 Created 
+2026-10-28 18:21:08,801 | INFO | imagen 1850x1850 → 3 franjas entre 3 workers: 172.20.0.2:8080, 34.151.250.6:8080, 34.39.241.144:8080
+2026-10-28 18:21:09,063 | INFO | franja 1/3 (616 filas) → 172.20.0.2:8080 en 0.261 s
+2026-10-28 18:21:09,845 | INFO | franja 2/3 (617 filas) → 34.151.250.6:8080 en 1.043 s
+2026-10-28 18:21:09,868 | INFO | franja 3/3 (617 filas) → 34.39.241.144:8080 en 1.066 s
+2026-10-28 18:21:10,245 | INFO | lectura 0.097 s | reparto y sobel 1.068 s | escritura 0.375 s | total 1.541 s
+imagen procesada en 150 s en total
+teardown: borrando las VMs
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Planning failed. Terraform encountered an error while generating this plan.
+
+╷
+│ Error: Invalid value for input variable
+│ 
+│   on variables.tf line 16:
+│   16: variable "cantidad" {
+│ 
+│ Unsuitable value for var.cantidad set using -var="cantidad=...": a number
+│ is required.
+╵
+teardown: borrando las VMs
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Planning failed. Terraform encountered an error while generating this plan.
+
+╷
+│ Error: Invalid value for input variable
+│ 
+│   on variables.tf line 16:
+│   16: variable "cantidad" {
+│ 
+│ Unsuitable value for var.cantidad set using -var="cantidad=...": a number
+│ is required.
+╵
+teardown: borrando las VMs
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Planning failed. Terraform encountered an error while generating this plan.
+
+╷
+│ Error: Invalid value for input variable
+│ 
+│   on variables.tf line 16:
+│   16: variable "cantidad" {
+│ 
+│ Unsuitable value for var.cantidad set using -var="cantidad=...": a number
+│ is required.
+╵
+teardown: borrando las VMs
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # google_compute_instance.worker[0] will be created
+  + resource "google_compute_instance" "worker" {
+      + can_ip_forward       = false
+      + cpu_platform         = (known after apply)
+      + creation_timestamp   = (known after apply)
+      + current_status       = (known after apply)
+      + deletion_protection  = false
+      + effective_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + id                   = (known after apply)
+      + instance_id          = (known after apply)
+      + label_fingerprint    = (known after apply)
+      + machine_type         = "e2-standard-2"
+      + metadata             = {
+          + "enable-oslogin" = "TRUE"
+          + "startup-script" = <<-EOT
+                #!/bin/bash
+                # Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+                set -euo pipefail
+                if ! command -v docker >/dev/null; then
+                  apt-get update -q
+                  apt-get install -y -q docker.io
+                fi
+                # La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
+                gcloud auth configure-docker "southamerica-east1-docker.pkg.dev" --quiet
+                docker pull "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+                docker rm -f worker 2>/dev/null || true
+                docker run -d --name worker --restart unless-stopped -p 8080:8080 "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+            EOT
+        }
+      + metadata_fingerprint = (known after apply)
+      + min_cpu_platform     = (known after apply)
+      + name                 = "sobel-hit2-worker-0"
+      + project              = "chimera-tp3"
+      + self_link            = (known after apply)
+      + tags                 = [
+          + "sobel-hit2-worker",
+        ]
+      + tags_fingerprint     = (known after apply)
+      + terraform_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + zone                 = "southamerica-east1-a"
+
+      + boot_disk {
+          + auto_delete                = true
+          + device_name                = (known after apply)
+          + disk_encryption_key_sha256 = (known after apply)
+          + guest_os_features          = (known after apply)
+          + kms_key_self_link          = (known after apply)
+          + mode                       = "READ_WRITE"
+          + source                     = (known after apply)
+
+          + initialize_params {
+              + architecture           = (known after apply)
+              + image                  = "debian-cloud/debian-12"
+              + labels                 = (known after apply)
+              + provisioned_iops       = (known after apply)
+              + provisioned_throughput = (known after apply)
+              + resource_policies      = (known after apply)
+              + size                   = 10
+              + snapshot               = (known after apply)
+              + type                   = (known after apply)
+            }
+        }
+
+      + confidential_instance_config (known after apply)
+
+      + guest_accelerator (known after apply)
+
+      + network_interface {
+          + internal_ipv6_prefix_length = (known after apply)
+          + ipv6_access_type            = (known after apply)
+          + ipv6_address                = (known after apply)
+          + name                        = (known after apply)
+          + network                     = "default"
+          + network_attachment          = (known after apply)
+          + network_ip                  = (known after apply)
+          + stack_type                  = (known after apply)
+          + subnetwork                  = (known after apply)
+          + subnetwork_project          = (known after apply)
+
+          + access_config {
+              + nat_ip       = (known after apply)
+              + network_tier = (known after apply)
+            }
+        }
+
+      + reservation_affinity (known after apply)
+
+      + scheduling (known after apply)
+
+      + service_account {
+          + email  = "sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com"
+          + scopes = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        }
+
+      + shielded_instance_config {
+          + enable_integrity_monitoring = true
+          + enable_secure_boot          = true
+          + enable_vtpm                 = true
+        }
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  ~ ips     = [
+      + (known after apply),
+    ]
+  ~ workers = null -> (known after apply)
+google_compute_instance.worker[0]: Creating...
+google_compute_instance.worker[0]: Still creating... [00m10s elapsed]
+google_compute_instance.worker[0]: Still creating... [00m20s elapsed]
+google_compute_instance.worker[0]: Creation complete after 29s [id=projects/chimera-tp3/zones/southamerica-east1-a/instances/sobel-hit2-worker-0]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+ips = [
+  "34.151.250.6",
+]
+workers = "34.151.250.6:8080"
+VMs listas en 100 s: 34.151.250.6:8080
+time="2026-10-28T15:37:59-03:00" level=warning msg="buildx Docker CLI plugin not found: falling back to the classic builder. BuildKit-only build features (multi-arch, secrets, ssh, additional contexts, ...) will not be available"
+ Image sobel-hit1:local Building 
+ Image sobel-hit1:local Building 
+Sending build context to Docker daemon   10.9kB
+Step 1/11 : FROM python:3.14-slim
+ ---> a2b82f3c4855
+Step 2/11 : ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ ---> Using cache
+ ---> daff50881496
+Step 3/11 : WORKDIR /app
+ ---> Using cache
+ ---> 92c32117f700
+Step 4/11 : COPY requirements.txt .
+ ---> Using cache
+ ---> 002e63267fbf
+Step 5/11 : RUN pip install --no-cache-dir -r requirements.txt
+ ---> Using cache
+ ---> a703076fb443
+Step 6/11 : RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin sobel     && mkdir logs && chown sobel logs
+ ---> Using cache
+ ---> 03273cefea58
+Step 7/11 : COPY *.py ./
+ ---> Using cache
+ ---> e9af6529cd11
+Step 8/11 : USER sobel
+ ---> Using cache
+ ---> cd2f75c78f5b
+Step 9/11 : EXPOSE 8080
+ ---> Using cache
+ ---> cece4ac91c00
+Step 10/11 : CMD ["python", "worker.py"]
+ ---> Using cache
+ ---> 26230f5b0641
+Step 11/11 : LABEL com.docker.compose.image.builder=classic
+ ---> Using cache
+ ---> ef18d4a8a47d
+Successfully built ef18d4a8a47d
+Successfully tagged sobel-hit1:local
+ Image sobel-hit1:local Built 
+ Image sobel-hit1:local Built 
+ Container hit1-worker-1 Running 
+ Container hit1-worker-1 Waiting 
+ Container hit1-worker-1 Healthy 
+ Container hit1-master-run-4b3026412072 Creating 
+ Container hit1-master-run-4b3026412072 Created 
+2026-10-28 18:38:02,736 | INFO | imagen 1850x1850 → 2 franjas entre 2 workers: 172.20.0.2:8080, 34.151.250.6:8080
+2026-10-28 18:38:03,085 | INFO | franja 1/2 (925 filas) → 172.20.0.2:8080 en 0.349 s
+2026-10-28 18:38:04,014 | INFO | franja 2/2 (925 filas) → 34.151.250.6:8080 en 1.277 s
+2026-10-28 18:38:04,392 | INFO | lectura 0.091 s | reparto y sobel 1.279 s | escritura 0.377 s | total 1.747 s
+imagen procesada en 105 s en total
+teardown: borrando las VMs
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # google_compute_instance.worker[0] will be created
+  + resource "google_compute_instance" "worker" {
+      + can_ip_forward       = false
+      + cpu_platform         = (known after apply)
+      + creation_timestamp   = (known after apply)
+      + current_status       = (known after apply)
+      + deletion_protection  = false
+      + effective_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + id                   = (known after apply)
+      + instance_id          = (known after apply)
+      + label_fingerprint    = (known after apply)
+      + machine_type         = "e2-standard-2"
+      + metadata             = {
+          + "enable-oslogin" = "TRUE"
+          + "startup-script" = <<-EOT
+                #!/bin/bash
+                # Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+                set -euo pipefail
+                if ! command -v docker >/dev/null; then
+                  apt-get update -q
+                  apt-get install -y -q docker.io
+                fi
+                # La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
+                gcloud auth configure-docker "southamerica-east1-docker.pkg.dev" --quiet
+                docker pull "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+                docker rm -f worker 2>/dev/null || true
+                docker run -d --name worker --restart unless-stopped -p 8080:8080 "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+            EOT
+        }
+      + metadata_fingerprint = (known after apply)
+      + min_cpu_platform     = (known after apply)
+      + name                 = "sobel-hit2-worker-0"
+      + project              = "chimera-tp3"
+      + self_link            = (known after apply)
+      + tags                 = [
+          + "sobel-hit2-worker",
+        ]
+      + tags_fingerprint     = (known after apply)
+      + terraform_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + zone                 = "southamerica-east1-a"
+
+      + boot_disk {
+          + auto_delete                = true
+          + device_name                = (known after apply)
+          + disk_encryption_key_sha256 = (known after apply)
+          + guest_os_features          = (known after apply)
+          + kms_key_self_link          = (known after apply)
+          + mode                       = "READ_WRITE"
+          + source                     = (known after apply)
+
+          + initialize_params {
+              + architecture           = (known after apply)
+              + image                  = "debian-cloud/debian-12"
+              + labels                 = (known after apply)
+              + provisioned_iops       = (known after apply)
+              + provisioned_throughput = (known after apply)
+              + resource_policies      = (known after apply)
+              + size                   = 10
+              + snapshot               = (known after apply)
+              + type                   = (known after apply)
+            }
+        }
+
+      + confidential_instance_config (known after apply)
+
+      + guest_accelerator (known after apply)
+
+      + network_interface {
+          + internal_ipv6_prefix_length = (known after apply)
+          + ipv6_access_type            = (known after apply)
+          + ipv6_address                = (known after apply)
+          + name                        = (known after apply)
+          + network                     = "default"
+          + network_attachment          = (known after apply)
+          + network_ip                  = (known after apply)
+          + stack_type                  = (known after apply)
+          + subnetwork                  = (known after apply)
+          + subnetwork_project          = (known after apply)
+
+          + access_config {
+              + nat_ip       = (known after apply)
+              + network_tier = (known after apply)
+            }
+        }
+
+      + reservation_affinity (known after apply)
+
+      + scheduling (known after apply)
+
+      + service_account {
+          + email  = "sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com"
+          + scopes = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        }
+
+      + shielded_instance_config {
+          + enable_integrity_monitoring = true
+          + enable_secure_boot          = true
+          + enable_vtpm                 = true
+        }
+    }
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  ~ ips     = [
+      + (known after apply),
+    ]
+  ~ workers = null -> (known after apply)
+google_compute_instance.worker[0]: Creating...
+google_compute_instance.worker[0]: Still creating... [00m10s elapsed]
+google_compute_instance.worker[0]: Still creating... [00m20s elapsed]
+google_compute_instance.worker[0]: Creation complete after 30s [id=projects/chimera-tp3/zones/southamerica-east1-a/instances/sobel-hit2-worker-0]
+
+Apply complete! Resources: 1 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+ips = [
+  "34.39.241.144",
+]
+workers = "34.39.241.144:8080"
+VMs listas en 108 s: 34.39.241.144:8080
+time="2026-10-28T15:40:48-03:00" level=warning msg="buildx Docker CLI plugin not found: falling back to the classic builder. BuildKit-only build features (multi-arch, secrets, ssh, additional contexts, ...) will not be available"
+ Image sobel-hit1:local Building 
+ Image sobel-hit1:local Building 
+Sending build context to Docker daemon   10.9kB
+Step 1/11 : FROM python:3.14-slim
+ ---> a2b82f3c4855
+Step 2/11 : ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ ---> Using cache
+ ---> daff50881496
+Step 3/11 : WORKDIR /app
+ ---> Using cache
+ ---> 92c32117f700
+Step 4/11 : COPY requirements.txt .
+ ---> Using cache
+ ---> 002e63267fbf
+Step 5/11 : RUN pip install --no-cache-dir -r requirements.txt
+ ---> Using cache
+ ---> a703076fb443
+Step 6/11 : RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin sobel     && mkdir logs && chown sobel logs
+ ---> Using cache
+ ---> 03273cefea58
+Step 7/11 : COPY *.py ./
+ ---> Using cache
+ ---> e9af6529cd11
+Step 8/11 : USER sobel
+ ---> Using cache
+ ---> cd2f75c78f5b
+Step 9/11 : EXPOSE 8080
+ ---> Using cache
+ ---> cece4ac91c00
+Step 10/11 : CMD ["python", "worker.py"]
+ ---> Using cache
+ ---> 26230f5b0641
+Step 11/11 : LABEL com.docker.compose.image.builder=classic
+ ---> Using cache
+ ---> ef18d4a8a47d
+Successfully built ef18d4a8a47d
+Successfully tagged sobel-hit1:local
+ Image sobel-hit1:local Built 
+ Image sobel-hit1:local Built 
+ Container hit1-worker-1 Running 
+ Container hit1-worker-1 Waiting 
+ Container hit1-worker-1 Healthy 
+ Container hit1-master-run-572282e79420 Creating 
+ Container hit1-master-run-572282e79420 Created 
+2026-10-28 18:40:52,014 | INFO | imagen 4150x4150 → 2 franjas entre 2 workers: 172.20.0.2:8080, 34.39.241.144:8080
+2026-10-28 18:40:53,750 | INFO | franja 1/2 (2075 filas) → 172.20.0.2:8080 en 1.735 s
+2026-10-28 18:40:55,890 | INFO | franja 2/2 (2075 filas) → 34.39.241.144:8080 en 3.876 s
+2026-10-28 18:40:58,035 | INFO | lectura 0.379 s | reparto y sobel 3.883 s | escritura 2.139 s | total 6.400 s
+imagen procesada en 118 s en total
+teardown: borrando las VMs
+google_service_account.worker: Refreshing state... [id=projects/chimera-tp3/serviceAccounts/sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+google_compute_firewall.worker: Refreshing state... [id=projects/chimera-tp3/global/firewalls/sobel-hit2-worker]
+google_project_iam_member.worker_lee_imagenes: Refreshing state... [id=chimera-tp3/roles/artifactregistry.reader/serviceAccount:sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com]
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # google_compute_instance.worker[0] will be created
+  + resource "google_compute_instance" "worker" {
+      + can_ip_forward       = false
+      + cpu_platform         = (known after apply)
+      + creation_timestamp   = (known after apply)
+      + current_status       = (known after apply)
+      + deletion_protection  = false
+      + effective_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + id                   = (known after apply)
+      + instance_id          = (known after apply)
+      + label_fingerprint    = (known after apply)
+      + machine_type         = "e2-standard-2"
+      + metadata             = {
+          + "enable-oslogin" = "TRUE"
+          + "startup-script" = <<-EOT
+                #!/bin/bash
+                # Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+                set -euo pipefail
+                if ! command -v docker >/dev/null; then
+                  apt-get update -q
+                  apt-get install -y -q docker.io
+                fi
+                # La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
+                gcloud auth configure-docker "southamerica-east1-docker.pkg.dev" --quiet
+                docker pull "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+                docker rm -f worker 2>/dev/null || true
+                docker run -d --name worker --restart unless-stopped -p 8080:8080 "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+            EOT
+        }
+      + metadata_fingerprint = (known after apply)
+      + min_cpu_platform     = (known after apply)
+      + name                 = "sobel-hit2-worker-0"
+      + project              = "chimera-tp3"
+      + self_link            = (known after apply)
+      + tags                 = [
+          + "sobel-hit2-worker",
+        ]
+      + tags_fingerprint     = (known after apply)
+      + terraform_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + zone                 = "southamerica-east1-a"
+
+      + boot_disk {
+          + auto_delete                = true
+          + device_name                = (known after apply)
+          + disk_encryption_key_sha256 = (known after apply)
+          + guest_os_features          = (known after apply)
+          + kms_key_self_link          = (known after apply)
+          + mode                       = "READ_WRITE"
+          + source                     = (known after apply)
+
+          + initialize_params {
+              + architecture           = (known after apply)
+              + image                  = "debian-cloud/debian-12"
+              + labels                 = (known after apply)
+              + provisioned_iops       = (known after apply)
+              + provisioned_throughput = (known after apply)
+              + resource_policies      = (known after apply)
+              + size                   = 10
+              + snapshot               = (known after apply)
+              + type                   = (known after apply)
+            }
+        }
+
+      + confidential_instance_config (known after apply)
+
+      + guest_accelerator (known after apply)
+
+      + network_interface {
+          + internal_ipv6_prefix_length = (known after apply)
+          + ipv6_access_type            = (known after apply)
+          + ipv6_address                = (known after apply)
+          + name                        = (known after apply)
+          + network                     = "default"
+          + network_attachment          = (known after apply)
+          + network_ip                  = (known after apply)
+          + stack_type                  = (known after apply)
+          + subnetwork                  = (known after apply)
+          + subnetwork_project          = (known after apply)
+
+          + access_config {
+              + nat_ip       = (known after apply)
+              + network_tier = (known after apply)
+            }
+        }
+
+      + reservation_affinity (known after apply)
+
+      + scheduling (known after apply)
+
+      + service_account {
+          + email  = "sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com"
+          + scopes = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        }
+
+      + shielded_instance_config {
+          + enable_integrity_monitoring = true
+          + enable_secure_boot          = true
+          + enable_vtpm                 = true
+        }
+    }
+
+  # google_compute_instance.worker[1] will be created
+  + resource "google_compute_instance" "worker" {
+      + can_ip_forward       = false
+      + cpu_platform         = (known after apply)
+      + creation_timestamp   = (known after apply)
+      + current_status       = (known after apply)
+      + deletion_protection  = false
+      + effective_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + id                   = (known after apply)
+      + instance_id          = (known after apply)
+      + label_fingerprint    = (known after apply)
+      + machine_type         = "e2-standard-2"
+      + metadata             = {
+          + "enable-oslogin" = "TRUE"
+          + "startup-script" = <<-EOT
+                #!/bin/bash
+                # Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+                set -euo pipefail
+                if ! command -v docker >/dev/null; then
+                  apt-get update -q
+                  apt-get install -y -q docker.io
+                fi
+                # La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
+                gcloud auth configure-docker "southamerica-east1-docker.pkg.dev" --quiet
+                docker pull "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+                docker rm -f worker 2>/dev/null || true
+                docker run -d --name worker --restart unless-stopped -p 8080:8080 "southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0"
+            EOT
+        }
+      + metadata_fingerprint = (known after apply)
+      + min_cpu_platform     = (known after apply)
+      + name                 = "sobel-hit2-worker-1"
+      + project              = "chimera-tp3"
+      + self_link            = (known after apply)
+      + tags                 = [
+          + "sobel-hit2-worker",
+        ]
+      + tags_fingerprint     = (known after apply)
+      + terraform_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + zone                 = "southamerica-east1-a"
+
+      + boot_disk {
+          + auto_delete                = true
+          + device_name                = (known after apply)
+          + disk_encryption_key_sha256 = (known after apply)
+          + guest_os_features          = (known after apply)
+          + kms_key_self_link          = (known after apply)
+          + mode                       = "READ_WRITE"
+          + source                     = (known after apply)
+
+          + initialize_params {
+              + architecture           = (known after apply)
+              + image                  = "debian-cloud/debian-12"
+              + labels                 = (known after apply)
+              + provisioned_iops       = (known after apply)
+              + provisioned_throughput = (known after apply)
+              + resource_policies      = (known after apply)
+              + size                   = 10
+              + snapshot               = (known after apply)
+              + type                   = (known after apply)
+            }
+        }
+
+      + confidential_instance_config (known after apply)
+
+      + guest_accelerator (known after apply)
+
+      + network_interface {
+          + internal_ipv6_prefix_length = (known after apply)
+          + ipv6_access_type            = (known after apply)
+          + ipv6_address                = (known after apply)
+          + name                        = (known after apply)
+          + network                     = "default"
+          + network_attachment          = (known after apply)
+          + network_ip                  = (known after apply)
+          + stack_type                  = (known after apply)
+          + subnetwork                  = (known after apply)
+          + subnetwork_project          = (known after apply)
+
+          + access_config {
+              + nat_ip       = (known after apply)
+              + network_tier = (known after apply)
+            }
+        }
+
+      + reservation_affinity (known after apply)
+
+      + scheduling (known after apply)
+
+      + service_account {
+          + email  = "sobel-worker-hit2@chimera-tp3.iam.gserviceaccount.com"
+          + scopes = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        }
+
+      + shielded_instance_config {
+          + enable_integrity_monitoring = true
+          + enable_secure_boot          = true
+          + enable_vtpm                 = true
+        }
+    }
+
+Plan: 2 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  ~ ips     = [
+      + (known after apply),
+      + (known after apply),
+    ]
+  ~ workers = null -> (known after apply)
+google_compute_instance.worker[1]: Creating...
+google_compute_instance.worker[0]: Creating...
+google_compute_instance.worker[1]: Still creating... [00m10s elapsed]
+google_compute_instance.worker[0]: Still creating... [00m10s elapsed]
+google_compute_instance.worker[1]: Creation complete after 18s [id=projects/chimera-tp3/zones/southamerica-east1-a/instances/sobel-hit2-worker-1]
+google_compute_instance.worker[0]: Still creating... [00m20s elapsed]
+google_compute_instance.worker[0]: Creation complete after 29s [id=projects/chimera-tp3/zones/southamerica-east1-a/instances/sobel-hit2-worker-0]
+
+Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+
+Outputs:
+
+ips = [
+  "34.151.250.6",
+  "34.39.241.144",
+]
+workers = "34.151.250.6:8080,34.39.241.144:8080"
+VMs listas en 93 s: 34.151.250.6:8080,34.39.241.144:8080
+time="2026-10-28T15:43:27-03:00" level=warning msg="buildx Docker CLI plugin not found: falling back to the classic builder. BuildKit-only build features (multi-arch, secrets, ssh, additional contexts, ...) will not be available"
+ Image sobel-hit1:local Building 
+ Image sobel-hit1:local Building 
+Sending build context to Docker daemon   10.9kB
+Step 1/11 : FROM python:3.14-slim
+ ---> a2b82f3c4855
+Step 2/11 : ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ ---> Using cache
+ ---> daff50881496
+Step 3/11 : WORKDIR /app
+ ---> Using cache
+ ---> 92c32117f700
+Step 4/11 : COPY requirements.txt .
+ ---> Using cache
+ ---> 002e63267fbf
+Step 5/11 : RUN pip install --no-cache-dir -r requirements.txt
+ ---> Using cache
+ ---> a703076fb443
+Step 6/11 : RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin sobel     && mkdir logs && chown sobel logs
+ ---> Using cache
+ ---> 03273cefea58
+Step 7/11 : COPY *.py ./
+ ---> Using cache
+ ---> e9af6529cd11
+Step 8/11 : USER sobel
+ ---> Using cache
+ ---> cd2f75c78f5b
+Step 9/11 : EXPOSE 8080
+ ---> Using cache
+ ---> cece4ac91c00
+Step 10/11 : CMD ["python", "worker.py"]
+ ---> Using cache
+ ---> 26230f5b0641
+Step 11/11 : LABEL com.docker.compose.image.builder=classic
+ ---> Using cache
+ ---> ef18d4a8a47d
+Successfully built ef18d4a8a47d
+Successfully tagged sobel-hit1:local
+ Image sobel-hit1:local Built 
+ Image sobel-hit1:local Built 
+ Container hit1-worker-1 Running 
+ Container hit1-worker-1 Waiting 
+ Container hit1-worker-1 Healthy 
+ Container hit1-master-run-e132ab445d5e Creating 
+ Container hit1-master-run-e132ab445d5e Created 
+2026-10-28 18:43:30,528 | INFO | imagen 4150x4150 → 3 franjas entre 3 workers: 172.20.0.2:8080, 34.151.250.6:8080, 34.39.241.144:8080
+2026-10-28 18:43:31,705 | INFO | franja 1/3 (1383 filas) → 172.20.0.2:8080 en 1.176 s
+2026-10-28 18:43:32,759 | INFO | franja 3/3 (1384 filas) → 34.39.241.144:8080 en 2.229 s
+2026-10-28 18:43:33,317 | INFO | franja 2/3 (1383 filas) → 34.151.250.6:8080 en 2.787 s
+2026-10-28 18:43:35,450 | INFO | lectura 0.338 s | reparto y sobel 2.791 s | escritura 2.131 s | total 5.260 s
+imagen procesada en 101 s en total
+teardown: borrando las VMs
