@@ -87,13 +87,15 @@ const RAMP_UP = __ENV.RAMP_UP || '5s';
 const POLL_JOB = __ENV.POLL_JOB !== 'false';
 
 // Referencia de la imagen OCI del worker a utilizar en el pipeline (según Contrato Sección 4).
-const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.1.0';
+const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.1.1';
 
 
 // ==============================================================================
 // Configuración de Ejecución de k6 (Options)
 // ==============================================================================
 export const options = {
+  // p50 (med), p95 y p99 en el resumen que exporta --summary-export.
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   // Definición de etapas (stages) para generar la rampa de carga:
   stages: [
     { duration: RAMP_UP, target: VC },      // 1. Rampa de subida: alcanzar VC usuarios concurrentes.
