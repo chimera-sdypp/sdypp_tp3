@@ -44,7 +44,8 @@ jobs:
   plan:
     name: Terraform plan (${{ matrix.dir }})
     needs: validar
-    if: github.event_name == 'pull_request' && vars.GCP_PROVEEDOR_WIF != ''
+    # TF_ACTIVO=false: el proyecto no tiene facturación y GCP no deja ni leer el estado (ver infra/README.md).
+    if: github.event_name == 'pull_request' && vars.GCP_PROVEEDOR_WIF != '' && vars.TF_ACTIVO != 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -70,7 +71,7 @@ jobs:
   apply:
     name: Terraform apply (${{ matrix.dir }})
     needs: validar
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_PROVEEDOR_WIF != ''
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GCP_PROVEEDOR_WIF != '' && vars.TF_ACTIVO != 'false'
     runs-on: ubuntu-latest
     permissions:
       contents: read
