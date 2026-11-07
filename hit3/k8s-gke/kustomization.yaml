@@ -1,5 +1,8 @@
-# Hit #3 en el GKE compartido (proyecto tp3distribuidos, cluster tp3): namespace propio, los nodos con las
-# etiquetas del cluster (pool=infra / pool=apps) y el ingress de GKE, porque no hay traefik.
+# Hit #3 en el GKE compartido (proyecto tp3distribuidos, cluster tp3): namespace propio, un node pool propio
+# (pool=chimera, con taint: el otro grupo no lo usa y nosotros no usamos el suyo) y el ingress de GKE, porque no
+# hay traefik. El pool se creó con:
+#   gcloud container node-pools create chimera --cluster tp3 --zone us-central1-a --machine-type e2-standard-2 \
+#     --num-nodes 2 --disk-type pd-standard --disk-size 50 --node-labels pool=chimera --node-taints pool=chimera:NoSchedule
 #   kubectl create namespace chimera-sobel
 #   SOBEL_NAMESPACE=chimera-sobel GHCR_USER=<usuario> GHCR_PAT=<token read:packages> hit3/k8s/crear_secretos.sh
 #   kubectl apply -k hit3/k8s-gke
@@ -22,19 +25,15 @@ patches:
         path: /metadata/name
         value: chimera-sobel
   - target: {kind: Deployment}
-    patch: |-
+    patch: &nuestros-nodos |-
       - op: replace
         path: /spec/template/spec/nodeSelector
-        value: {pool: apps}
-      - op: remove
+        value: {pool: chimera}
+      - op: replace
         path: /spec/template/spec/tolerations
+        value: [{key: pool, operator: Equal, value: chimera, effect: NoSchedule}]
   - target: {kind: StatefulSet}
-    patch: |-
-      - op: replace
-        path: /spec/template/spec/nodeSelector
-        value: {pool: infra}
-      - op: remove
-        path: /spec/template/spec/tolerations
+    patch: *nuestros-nodos
   - target: {kind: StatefulSet, name: rabbitmq}
     patch: |-
       - op: replace
