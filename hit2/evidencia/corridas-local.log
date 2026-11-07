@@ -1,0 +1,60 @@
+centralizado 1mb r1: 2026-10-27 23:54:49,366 | INFO | 600x600 px | lectura 0.036 s | sobel 0.016 s | escritura 0.036 s | total 0.088 s
+centralizado 1mb r2: 2026-10-27 23:54:50,242 | INFO | 600x600 px | lectura 0.035 s | sobel 0.014 s | escritura 0.035 s | total 0.085 s
+centralizado 1mb r3: 2026-10-27 23:54:51,082 | INFO | 600x600 px | lectura 0.035 s | sobel 0.014 s | escritura 0.035 s | total 0.084 s
+centralizado 10mb r1: 2026-10-27 23:54:52,446 | INFO | 1850x1850 px | lectura 0.091 s | sobel 0.146 s | escritura 0.374 s | total 0.612 s
+centralizado 10mb r2: 2026-10-27 23:54:53,848 | INFO | 1850x1850 px | lectura 0.087 s | sobel 0.147 s | escritura 0.371 s | total 0.606 s
+centralizado 10mb r3: 2026-10-27 23:54:55,257 | INFO | 1850x1850 px | lectura 0.090 s | sobel 0.145 s | escritura 0.373 s | total 0.607 s
+centralizado 50mb r1: 2026-10-27 23:54:59,307 | INFO | 4150x4150 px | lectura 0.346 s | sobel 0.808 s | escritura 2.105 s | total 3.258 s
+centralizado 50mb r2: 2026-10-27 23:55:03,488 | INFO | 4150x4150 px | lectura 0.333 s | sobel 0.813 s | escritura 2.121 s | total 3.267 s
+centralizado 50mb r3: 2026-10-27 23:55:07,654 | INFO | 4150x4150 px | lectura 0.350 s | sobel 0.818 s | escritura 2.099 s | total 3.268 s
+centralizado 100mb r1: 2026-10-27 23:55:15,645 | INFO | 5750x5750 px | lectura 0.640 s | sobel 1.722 s | escritura 4.720 s | total 7.082 s
+centralizado 100mb r2: 2026-10-27 23:55:23,845 | INFO | 5750x5750 px | lectura 0.670 s | sobel 1.770 s | escritura 4.512 s | total 6.951 s
+centralizado 100mb r3: 2026-10-27 23:55:32,547 | INFO | 5750x5750 px | lectura 0.764 s | sobel 1.961 s | escritura 4.562 s | total 7.288 s
+w=1 1mb r1: 2026-10-27 23:55:41,863 | INFO | lectura 0.046 s | reparto y sobel 0.130 s | escritura 0.045 s | total 0.222 s
+w=1 1mb r2: 2026-10-27 23:55:44,656 | INFO | lectura 0.055 s | reparto y sobel 0.099 s | escritura 0.045 s | total 0.199 s
+w=1 1mb r3: 2026-10-27 23:55:46,102 | INFO | lectura 0.051 s | reparto y sobel 0.098 s | escritura 0.041 s | total 0.191 s
+w=1 10mb r1: 2026-10-27 23:55:48,641 | INFO | lectura 0.101 s | reparto y sobel 0.811 s | escritura 0.400 s | total 1.312 s
+w=1 10mb r2: 2026-10-27 23:55:51,423 | INFO | lectura 0.094 s | reparto y sobel 0.797 s | escritura 0.406 s | total 1.297 s
+w=1 10mb r3: 2026-10-27 23:55:54,346 | INFO | lectura 0.099 s | reparto y sobel 0.962 s | escritura 0.665 s | total 1.727 s
+w=1 50mb r1: 2026-10-27 23:56:04,120 | INFO | lectura 0.392 s | reparto y sobel 3.594 s | escritura 2.261 s | total 6.247 s
+w=1 50mb r2: 2026-10-27 23:56:11,297 | INFO | lectura 0.355 s | reparto y sobel 3.455 s | escritura 2.193 s | total 6.003 s
+w=1 50mb r3: 2026-10-27 23:56:18,681 | INFO | lectura 0.363 s | reparto y sobel 3.524 s | escritura 2.228 s | total 6.115 s
+w=1 100mb r1: 2026-10-27 23:56:31,330 | INFO | lectura 0.643 s | reparto y sobel 6.561 s | escritura 4.108 s | total 11.312 s
+w=1 100mb r2: 2026-10-27 23:56:43,605 | INFO | lectura 0.606 s | reparto y sobel 6.402 s | escritura 4.124 s | total 11.132 s
+w=1 100mb r3: 2026-10-27 23:56:56,237 | INFO | lectura 0.616 s | reparto y sobel 6.597 s | escritura 4.204 s | total 11.418 s
+w=2 1mb r1: 2026-10-27 23:57:03,560 | INFO | lectura 0.038 s | reparto y sobel 0.073 s | escritura 0.036 s | total 0.148 s
+w=2 1mb r2: 2026-10-27 23:57:04,952 | INFO | lectura 0.039 s | reparto y sobel 0.051 s | escritura 0.037 s | total 0.127 s
+w=2 1mb r3: 2026-10-27 23:57:06,124 | INFO | lectura 0.034 s | reparto y sobel 0.045 s | escritura 0.035 s | total 0.114 s
+w=2 10mb r1: 2026-10-27 23:57:08,256 | INFO | lectura 0.094 s | reparto y sobel 0.384 s | escritura 0.388 s | total 0.866 s
+w=2 10mb r2: 2026-10-27 23:57:13,332 | INFO | lectura 0.090 s | reparto y sobel 0.371 s | escritura 0.380 s | total 0.841 s
+w=2 10mb r3: 2026-10-27 23:57:15,397 | INFO | lectura 0.105 s | reparto y sobel 0.382 s | escritura 0.375 s | total 0.862 s
+w=2 50mb r1: 2026-10-27 23:57:21,013 | INFO | lectura 0.346 s | reparto y sobel 1.906 s | escritura 2.293 s | total 4.546 s
+w=2 50mb r2: 2026-10-27 23:57:26,859 | INFO | lectura 0.349 s | reparto y sobel 2.045 s | escritura 2.152 s | total 4.546 s
+w=2 50mb r3: 2026-10-27 23:57:32,502 | INFO | lectura 0.346 s | reparto y sobel 1.887 s | escritura 2.172 s | total 4.406 s
+w=2 100mb r1: 2026-10-27 23:57:42,797 | INFO | lectura 0.638 s | reparto y sobel 3.588 s | escritura 4.874 s | total 9.099 s
+w=2 100mb r2: 2026-10-27 23:57:58,066 | INFO | lectura 0.616 s | reparto y sobel 3.664 s | escritura 4.884 s | total 9.165 s
+w=2 100mb r3: 2026-10-27 23:58:08,583 | INFO | lectura 0.638 s | reparto y sobel 3.739 s | escritura 4.885 s | total 9.262 s
+w=4 1mb r1: 2026-10-27 23:58:16,258 | INFO | lectura 0.040 s | reparto y sobel 0.064 s | escritura 0.036 s | total 0.141 s
+w=4 1mb r2: 2026-10-27 23:58:17,306 | INFO | lectura 0.034 s | reparto y sobel 0.032 s | escritura 0.035 s | total 0.102 s
+w=4 1mb r3: 2026-10-27 23:58:18,378 | INFO | lectura 0.035 s | reparto y sobel 0.031 s | escritura 0.036 s | total 0.102 s
+w=4 10mb r1: 2026-10-27 23:58:20,074 | INFO | lectura 0.101 s | reparto y sobel 0.239 s | escritura 0.381 s | total 0.721 s
+w=4 10mb r2: 2026-10-27 23:58:21,773 | INFO | lectura 0.089 s | reparto y sobel 0.237 s | escritura 0.379 s | total 0.705 s
+w=4 10mb r3: 2026-10-27 23:58:23,458 | INFO | lectura 0.091 s | reparto y sobel 0.214 s | escritura 0.372 s | total 0.677 s
+w=4 50mb r1: 2026-10-27 23:58:28,096 | INFO | lectura 0.337 s | reparto y sobel 1.163 s | escritura 2.122 s | total 3.622 s
+w=4 50mb r2: 2026-10-27 23:58:32,866 | INFO | lectura 0.342 s | reparto y sobel 1.178 s | escritura 2.166 s | total 3.686 s
+w=4 50mb r3: 2026-10-27 23:58:39,893 | INFO | lectura 0.338 s | reparto y sobel 1.144 s | escritura 2.139 s | total 3.621 s
+w=4 100mb r1: 2026-10-27 23:58:47,804 | INFO | lectura 0.620 s | reparto y sobel 2.109 s | escritura 4.110 s | total 6.839 s
+w=4 100mb r2: 2026-10-27 23:58:55,888 | INFO | lectura 0.624 s | reparto y sobel 2.237 s | escritura 4.125 s | total 6.987 s
+w=4 100mb r3: 2026-10-27 23:59:03,894 | INFO | lectura 0.627 s | reparto y sobel 2.168 s | escritura 4.105 s | total 6.900 s
+w=8 1mb r1: 2026-10-27 23:59:11,721 | INFO | lectura 0.034 s | reparto y sobel 0.055 s | escritura 0.036 s | total 0.125 s
+w=8 1mb r2: 2026-10-27 23:59:12,816 | INFO | lectura 0.044 s | reparto y sobel 0.030 s | escritura 0.036 s | total 0.109 s
+w=8 1mb r3: 2026-10-27 23:59:13,964 | INFO | lectura 0.036 s | reparto y sobel 0.030 s | escritura 0.036 s | total 0.102 s
+w=8 10mb r1: 2026-10-27 23:59:15,873 | INFO | lectura 0.114 s | reparto y sobel 0.248 s | escritura 0.421 s | total 0.783 s
+w=8 10mb r2: 2026-10-27 23:59:17,815 | INFO | lectura 0.112 s | reparto y sobel 0.195 s | escritura 0.405 s | total 0.712 s
+w=8 10mb r3: 2026-10-27 23:59:19,767 | INFO | lectura 0.103 s | reparto y sobel 0.184 s | escritura 0.413 s | total 0.700 s
+w=8 50mb r1: 2026-10-27 23:59:24,172 | INFO | lectura 0.348 s | reparto y sobel 0.822 s | escritura 2.126 s | total 3.295 s
+w=8 50mb r2: 2026-10-27 23:59:30,245 | INFO | lectura 0.331 s | reparto y sobel 0.798 s | escritura 2.126 s | total 3.255 s
+w=8 50mb r3: 2026-10-27 23:59:34,677 | INFO | lectura 0.348 s | reparto y sobel 0.818 s | escritura 2.158 s | total 3.325 s
+w=8 100mb r1: 2026-10-27 23:59:42,128 | INFO | lectura 0.628 s | reparto y sobel 1.564 s | escritura 4.153 s | total 6.346 s
+w=8 100mb r2: 2026-10-27 23:59:49,831 | INFO | lectura 0.614 s | reparto y sobel 1.559 s | escritura 4.136 s | total 6.310 s
+w=8 100mb r3: 2026-10-27 23:59:57,193 | INFO | lectura 0.618 s | reparto y sobel 1.547 s | escritura 4.117 s | total 6.282 s

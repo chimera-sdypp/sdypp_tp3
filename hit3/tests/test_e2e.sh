@@ -27,6 +27,7 @@
 # -e: Finaliza inmediatamente si algún comando produce un código de salida distinto de cero.
 # -u: Trata las variables no declaradas o vacías como un error fatal.
 # -o pipefail: Hace que el código de retorno de una tubería sea el del último comando que falló.
+export LC_NUMERIC=C  # printf con decimales: con locale en español esperaría coma
 set -euo pipefail
 
 # Resolución de rutas absolutas del script y del directorio raíz del repositorio
@@ -44,7 +45,7 @@ URL="${SOBEL_URL:-http://localhost}"
 NAMESPACE="${SOBEL_NAMESPACE:-sobel}"
 
 # Imagen OCI autorizada del worker para el procesamiento de filtros (Sección 4 del Contrato)
-IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.0.0}"
+IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.1.0}"
 
 # Tiempo máximo en segundos para esperar la finalización del trabajo antes de timeout
 TIMEOUT_S="${SOBEL_TIMEOUT:-180}"

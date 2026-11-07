@@ -14,7 +14,7 @@ variable "zona" {
 }
 
 variable "cantidad" {
-  description = "Workers en la nube. En 0 no hay ninguna VM: desbordar.sh la sube para una imagen y la vuelve a 0"
+  description = "Workers en la nube. En 0 no hay ninguna VM: el escalador del master la sube según la cola y la vuelve a 0"
   type        = number
   default     = 0
 }

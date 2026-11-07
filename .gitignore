@@ -18,6 +18,7 @@ htmlcov/
 # Logs y datos que genera la ejecución
 logs/
 *.log
+!hit2/evidencia/*.log
 
 # Editores y sistema
 .idea/
@@ -66,10 +67,11 @@ TP3-P2*
 *.docx
 CONTEXTO*
 contexto*
+GUIA_DESPLIEGUE_KUBERNETES.md
+*gcp.sh
 
 # Test data & load test artifacts
 hit3/carga/datos/
-hit3/carga/resultados/
 
 
 # Terraform: el estado vive en el bucket remoto, nunca acá

@@ -8,8 +8,8 @@ kubectl apply -k hit3/k8s/
 
 TOKEN=$(kubectl -n sobel exec deploy/backend -- python -m backend.emitir_token ana usuario)
 curl -s -X POST http://localhost/jobs -H "Authorization: Bearer $TOKEN" -F archivos=@gato.png \
-  -F 'operaciones=[{"operacion":"grises","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.0.0"},
-                   {"operacion":"sobel","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.0.0"}]'
+  -F 'operaciones=[{"operacion":"grises","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.0"},
+                   {"operacion":"sobel","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.0"}]'
 curl -s http://localhost/jobs/<job_id> -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -17,9 +17,16 @@ O desde el navegador en `http://localhost/`: se pega el token, se suben las imá
 La API completa, los errores y las interfaces entre servicios están en el [contrato](contrato.md); el despliegue,
 en [k8s/](k8s/README.md); la observabilidad, en el [Hit #4](../hit4/README.md).
 
+En la nube corre en el GKE `tp3` del proyecto `tp3distribuidos` (compartido con otro grupo), en el namespace
+`chimera-sobel` y un node pool propio (`chimera`): <http://8.232.111.42> (`/health`). Se despliega con
+[`k8s-gke/`](k8s-gke/kustomization.yaml) y el monitoreo con [`k8s-gke/monitoreo.sh`](k8s-gke/monitoreo.sh); un token
+para la página o la API sale de `kubectl -n chimera-sobel exec deploy/backend -- python -m backend.emitir_token <usuario> <usuario|admin> --horas 24`.
+
 Tests: `pytest` en cada carpeta de servicio, y `pytest -m integracion` con `RABBITMQ_URL` y `REDIS_URL`.
-Evidencia: [`evidencia/r1.sh`](evidencia/r1.sh) (registry privado) y [`evidencia/r4.sh`](evidencia/r4.sh) (roles y
-réplicas sin estado).
+Evidencia: [`evidencia/r1.sh`](evidencia/r1.sh) (registry privado), [`evidencia/r4.sh`](evidencia/r4.sh) (roles y
+réplicas sin estado), [`evidencia/r_dlq.sh`](evidencia/r_dlq.sh) (falla provocada: reintentos → DLQ → agotados →
+reprocesar; salida en [`r_dlq-k3s.txt`](evidencia/r_dlq-k3s.txt)) y la carga con k6 en
+[`carga/resultados/`](carga/resultados/) (análisis en el informe, sección 9).
 
 ```mermaid
 flowchart LR
@@ -37,13 +44,14 @@ flowchart LR
         W[worker por imagen]
     end
     subgraph infra["pool infra"]
-        MQ[(RabbitMQ)]
+        MQ[(RabbitMQ x3)]
         RD[(Redis)]
         P[Prometheus y Grafana]
     end
     B -->|sobel.split| S
     S -->|"sobel.tareas.imagen"| W
-    W -->|sobel.resultados| J & F
+    W -->|sobel.resultados| J
+    F -.->|avance del job| RD
     W -.->|sobel.dlq| R -.->|reintento| W
     apps & fuera --- infra
 ```
@@ -65,8 +73,9 @@ Las flechas entre servicios son colas de RabbitMQ; los píxeles y el estado de c
   queda en `dlq` hasta que un admin lo reprocese. Nunca reintenta sin límite. El split
   y el joiner también mandan a la DLQ lo que no pueden procesar, pero eso no se arregla reintentando: el job pasa a
   `failed`.
-- **Fanout de resultados.** `sobel.resultados` llega al joiner (una cola compartida: compiten sus réplicas) y al
-  frontend (una cola exclusiva por réplica: cada una ve todos los resultados).
+- **Fanout de resultados.** `sobel.resultados` llega al joiner (una cola compartida: compiten sus réplicas).
+- **Frontend sin estado.** El avance que ve el navegador sale de Redis (`job:<id>`, `completos` y `fragmentos_total`), no
+  de RabbitMQ: cualquier réplica atiende a cualquier navegador.
 - **Backend sin estado (R4).** La identidad viaja en cada pedido (JWT HS256 con rol) y el límite por usuario se cuenta
   en Redis, así que da lo mismo qué réplica atiende. Un job ajeno da `404`, no `403`.
 - **Sin credenciales en el repo.** Las imágenes son privadas en GHCR y el CI las publica con el `GITHUB_TOKEN` del job,

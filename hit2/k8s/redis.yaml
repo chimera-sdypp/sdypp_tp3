@@ -1,0 +1,44 @@
+# El estado de cada pedido (un hash chico: estado, tiempos, workers), con vencimiento: Redis lo borra solo. Las imágenes
+# van al disco del master (almacen.py): en RAM, con fotos de 100 MB, llegó a pasar de 3 GiB y el contenedor murió.
+# Sin persistencia en disco (--save "" --appendonly no). Con --maxmemory, si se llenara borra primero lo que vence
+# antes (volatile-ttl) en vez de pasarse del límite del contenedor.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: sobel-hit1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        app.kubernetes.io/name: redis   # el label `app` de sus logs en Loki
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          args: ["--save", "", "--appendonly", "no", "--maxmemory", "200mb", "--maxmemory-policy", "volatile-ttl"]
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            tcpSocket:
+              port: 6379
+            periodSeconds: 5
+          resources:
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: sobel-hit1
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379

@@ -125,6 +125,26 @@ jobs:
       - name: Tolerancia a fallos con Docker (worker caído, colgado y docker kill)
         run: PYTHON=python bash tests/tolerancia.sh
 
+  hit2:
+    name: Hit 2 — master con desborde a la nube (tests del escalador y del disco, imagen)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hit2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Instalar dependencias
+        run: pip install pytest
+      - name: Compilar
+        run: python -m compileall -q *.py tests
+      - name: Tests del escalador (con un Terraform falso) y de las imágenes en disco
+        run: python -m pytest -v
+      - name: Construir la imagen
+        run: bash construir.sh sobel-hit2:ci
+
   hit3:
     # También corre el worker, el joiner y el reasignador, pero el nombre es un check obligatorio de dev: cambiarlo
     # traba los PR.

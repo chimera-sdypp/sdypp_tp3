@@ -1,12 +1,12 @@
 #!/bin/bash
-# Bootstrap del worker (startup-script de GCE, el user_data de GCP): Docker, la imagen y el worker en el 8080.
+# Bootstrap del worker (startup-script de GCE, el user_data de GCP): la imagen y el worker en el 8080. La VM usa
+# Container-Optimized OS, que ya trae Docker: no hay que instalarlo y arranca en la mitad de tiempo que Debian.
 set -euo pipefail
-if ! command -v docker >/dev/null; then
-  apt-get update -q
-  apt-get install -y -q docker.io
-fi
-# La imagen de Debian de GCE trae gcloud: autentica a Docker con la cuenta de servicio de la VM.
-gcloud auth configure-docker "${registro}" --quiet
+export HOME=/home/chronos   # el disco raíz de COS es de sólo lectura: la configuración de Docker va acá
+# Autentica a Docker con la cuenta de servicio de la VM (sin claves) y abre el 8080 en el firewall de COS,
+# que de entrada sólo deja pasar SSH.
+docker-credential-gcr configure-docker --registries="${registro}"
+iptables -w -A INPUT -p tcp --dport 8080 -j ACCEPT
 docker pull "${imagen}"
 docker rm -f worker 2>/dev/null || true
 docker run -d --name worker --restart unless-stopped -p 8080:8080 "${imagen}"

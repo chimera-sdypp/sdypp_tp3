@@ -19,15 +19,14 @@ spec:
           image: sdypp/ex4-app:latest
           imagePullPolicy: IfNotPresent
           command: ["python", "dlq_consumer.py"]
+          envFrom:
+            - secretRef:
+                name: rabbitmq-credenciales
           env:
             - name: RABBITMQ_HOST
               value: "rabbitmq-ex4-service"
             - name: RABBITMQ_PORT
               value: "5672"
-            - name: RABBITMQ_USER
-              value: "guest"
-            - name: RABBITMQ_PASS
-              value: "guest"
             - name: QUEUE_NAME
               value: "ex4_task_queue"
             - name: DLX_EXCHANGE

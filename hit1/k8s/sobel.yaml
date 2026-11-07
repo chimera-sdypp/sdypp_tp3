@@ -3,13 +3,13 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: sobel
+  name: sobel-hit1
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sobel-worker
-  namespace: sobel
+  namespace: sobel-hit1
 spec:
   replicas: 4
   selector:
@@ -20,6 +20,7 @@ spec:
       labels:
         app: sobel-worker
         rol: sobel-worker                # el Service selecciona por rol (ver k8s/fallas.yaml)
+        app.kubernetes.io/name: sobel-worker   # el label `app` de sus logs en Loki (Hit #4)
     spec:
       containers:
         - name: worker
@@ -39,7 +40,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: sobel-worker
-  namespace: sobel
+  namespace: sobel-hit1
 spec:
   clusterIP: None
   selector:

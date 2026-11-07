@@ -1,0 +1,19 @@
+# Prometheus (el kube-prometheus-stack del Hit #4) lee GET /metrics del master cada 5 s; el dashboard
+# (dashboard.json) lo carga el sidecar de Grafana por el label grafana_dashboard=1, que desplegar.sh le pone al
+# ConfigMap. Si el Hit #4 no está instalado, desplegar.sh saltea este archivo.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: sobel-master
+  namespace: sobel-hit1
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: sobel-master
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 5s
+      scrapeTimeout: 4s

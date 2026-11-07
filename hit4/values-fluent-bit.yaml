@@ -1,0 +1,78 @@
+# ==============================================================================
+# Values para fluent/fluent-bit (Helm Chart) — Hit #4: el agente que junta logs
+# ==============================================================================
+# Los servicios no mandan sus logs a ningún lado: escriben por stderr y el
+# runtime de contenedores (containerd, en k3s y GKE) los guarda en el disco del
+# nodo, en /var/log/containers/<pod>_<namespace>_<contenedor>-<id>.log.
+# Fluent Bit corre como DaemonSet (un pod por nodo), lee esos archivos, les
+# agrega de qué pod salió cada línea preguntándole a la API de Kubernetes, y se
+# los manda a Loki.
+# ==============================================================================
+
+kind: DaemonSet
+
+# Tiene que haber un Fluent Bit en cada nodo, también en los del grupo apps,
+# que es donde corren los servicios: tolera cualquier taint.
+tolerations:
+  - operator: Exists
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+config:
+  inputs: |
+    [INPUT]
+        Name              tail
+        Tag               kube.*
+        Path              /var/log/containers/*.log
+        # Sus propios logs no: cada línea que manda a Loki la volvería a leer.
+        Exclude_Path      /var/log/containers/fluent-bit-*_monitoring_*.log
+        multiline.parser  cri, docker
+        DB                /var/log/flb_kube.db
+        Mem_Buf_Limit     5MB
+        Skip_Long_Lines   On
+        Refresh_Interval  10
+
+  filters: |
+    # Agrega namespace, pod, contenedor y labels del pod, a partir del nombre del archivo.
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        Merge_Log           On
+        Keep_Log            Off
+        K8S-Logging.Parser  On
+        K8S-Logging.Exclude On
+
+    # Las líneas de hit3/comun/registro.py ("fecha | NIVEL | mensaje") dejan el nivel en su propio campo,
+    # para filtrar por nivel en Grafana. Las que no tienen ese formato (RabbitMQ, Redis) pasan igual.
+    [FILTER]
+        Name          parser
+        Match         kube.*
+        Key_Name      log
+        Parser        sobel
+        Reserve_Data  On
+        Preserve_Key  On
+
+  outputs: |
+    [OUTPUT]
+        Name            loki
+        Match           kube.*
+        Host            loki.monitoring.svc.cluster.local
+        Port            3100
+        # Pocos labels y de pocos valores: Loki indexa por labels y busca dentro del texto.
+        Labels          job=fluent-bit, namespace=$kubernetes['namespace_name'], pod=$kubernetes['pod_name'], contenedor=$kubernetes['container_name'], app=$kubernetes['labels']['app.kubernetes.io/name'], nivel=$nivel
+        # A Loki llega sólo el texto de la línea, como lo ve `kubectl logs`.
+        Remove_Keys     kubernetes, stream, _p, time, hora, nivel, mensaje
+        Drop_Single_Key raw
+        Line_Format     key_value
+
+  customParsers: |
+    [PARSER]
+        Name   sobel
+        Format regex
+        Regex  ^(?<hora>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) \| (?<nivel>[A-Z]+) \| (?<mensaje>.*)$

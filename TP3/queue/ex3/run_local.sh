@@ -40,6 +40,6 @@ docker compose exec -T rabbitmq rabbitmqctl -q list_bindings source_name destina
 echo ""
 echo "=========================================================="
 echo "  Ejecución finalizada con éxito."
-echo "  UI de management: http://localhost:15672 (guest/guest)"
+echo "  UI de management: http://localhost:15672 (usuario y contraseña de TP3/queue/.env)"
 echo "  Para apagar los contenedores ejecute: docker compose down -v"
 echo "=========================================================="

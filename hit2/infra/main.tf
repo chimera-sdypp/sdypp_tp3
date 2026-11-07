@@ -38,7 +38,7 @@ resource "google_compute_instance" "worker" {
 
   boot_disk {
     initialize_params {
-      image = "debian-cloud/debian-12"
+      image = "cos-cloud/cos-stable" # Container-Optimized OS: Docker ya instalado
       size  = 10
     }
   }

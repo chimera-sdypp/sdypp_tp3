@@ -1,8 +1,6 @@
 x-rabbitmq-env: &rabbitmq-env
   RABBITMQ_HOST: rabbitmq
   RABBITMQ_PORT: "5672"
-  RABBITMQ_USER: guest
-  RABBITMQ_PASS: guest
   QUEUE_NAME: ex3_task_queue
   DLX_EXCHANGE: dlx
   DLQ_NAME: dead_letter_queue
@@ -14,9 +12,7 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
+    env_file: ../.env
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -32,6 +28,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: python consumer.py
+    env_file: ../.env
     environment:
       <<: *rabbitmq-env
       PROCESSING_TIME: "0.5"
@@ -43,6 +40,7 @@ services:
     image: sdypp/ex3-app:latest
     pull_policy: never
     command: python dlq_consumer.py
+    env_file: ../.env
     environment:
       <<: *rabbitmq-env
     depends_on:
@@ -53,6 +51,7 @@ services:
     image: sdypp/ex3-app:latest
     pull_policy: never
     command: python producer.py
+    env_file: ../.env
     environment:
       <<: *rabbitmq-env
       NUM_TASKS: "10"

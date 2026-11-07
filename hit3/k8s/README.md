@@ -9,14 +9,14 @@ Este directorio contiene los manifiestos de Kubernetes para desplegar la arquite
 La arquitectura divide los pods en dos grupos de nodos mediante `nodeSelector` y `tolerations`:
 
 1. **`sobel/infra=true` (Infraestructura persistente y observabilidad):**
-   - **RabbitMQ StatefulSet:** broker de mensajería con volumen persistente (`5Gi`) montado en `/var/lib/rabbitmq` e imagen `rabbitmq:4-management`. Expone AMQP (`5672`), Management (`15672`) y el plugin `rabbitmq_prometheus` (`15692`).
+   - **RabbitMQ StatefulSet:** cluster de 3 réplicas con colas quorum (Raft); los nodos se encuentran por un Service headless (`rabbitmq-nodes`) y comparten la cookie de Erlang de `sobel-secretos`. Cada uno con volumen persistente (`5Gi`) en `/var/lib/rabbitmq` e imagen `rabbitmq:4-management`. Expone AMQP (`5672`), Management (`15672`) y el plugin `rabbitmq_prometheus` (`15692`).
    - **Redis StatefulSet:** almacén en memoria con persistencia en disco (`appendonly yes`, PVC `10Gi`), contraseña obligatoria (`requirepass`) y límites aumentados (`2Gi` RAM). Expone el puerto `6379`.
    - **Observabilidad (Hit #4):** stack de Prometheus, Alertmanager y Grafana (desplegado vía Helm en este mismo pool).
 
 2. **`sobel/apps=true` (Microservicios y procesamiento):**
    - **Backend Deployment:** 3 réplicas del API Gateway HTTP (`2Gi` RAM, puerto `8080`), validación previa de pedidos y métricas.
    - **Split Deployment:** divide imágenes entrantes en fragmentos con filas de borde (`2Gi` RAM para imágenes de hasta 100 megapíxeles).
-   - **Worker Deployment:** `sobel-worker`, que ofrece las tres operaciones (`sobel`, `grises`, `blur`), con `1Gi` RAM y un Service headless para scraping de Prometheus.
+   - **Worker Deployment:** `sobel-worker`, que ofrece las tres operaciones (`sobel`, `grises`, `blur`), con `2Gi` RAM (con 1Gi, el blur de una imagen de 100 MP moría por OOM) y un Service headless para scraping de Prometheus.
    - **Joiner Deployment:** 2 réplicas concurrentes (`2Gi` RAM) que consumen de `sobel.joiner`, coordinan la unión atómica en Redis y publican resultados.
    - **Reasignador Deployment:** consume la cola de fallos `sobel.dlq`, evalúa reintentos y deriva a `sobel.dlq.agotados` tras superar el umbral (`SOBEL_REINTENTOS_MAX: 3`).
    - **Frontend Deployment:** interfaz web y dashboard de progreso en vivo (puerto `8080`).
@@ -55,7 +55,7 @@ cd hit3/k8s
 ```
 
 El script genera automáticamente el Secret `sobel-secretos` en el namespace `sobel` con:
-- `RABBITMQ_USER` y `RABBITMQ_PASS` generados aleatoriamente (evitando defaults inseguros).
+- `RABBITMQ_USER` y `RABBITMQ_PASS` generados aleatoriamente (evitando defaults inseguros), y `RABBITMQ_ERLANG_COOKIE`, que comparten los 3 nodos del cluster.
 - `RABBITMQ_URL` (`amqp://<user>:<pass>@rabbitmq.sobel.svc.cluster.local:5672/`).
 - `REDIS_PASS` generado aleatoriamente y `REDIS_URL` (`redis://:<pass>@redis.sobel.svc.cluster.local:6379/0`).
 - `SOBEL_SECRETO` (clave criptográfica de 32 caracteres para tokens JWT HS256).
@@ -108,7 +108,7 @@ kubectl kustomize hit3/k8s/
 | Archivo | Tipo de Recurso | Descripción |
 |---|---|---|
 | `00-namespace.yaml` | `Namespace` | Namespace aislado `sobel` |
-| `01-rabbitmq.yaml` | `ConfigMap`, `Service`, `StatefulSet` | RabbitMQ 4 con plugin Prometheus y PVC de 5Gi en `sobel/infra=true` |
+| `01-rabbitmq.yaml` | `ConfigMap`, 2 `Service`, `StatefulSet` | RabbitMQ 4 con 3 réplicas, colas quorum, plugin Prometheus y PVC de 5Gi cada una en `sobel/infra=true` |
 | `02-redis.yaml` | `Service`, `StatefulSet` | Redis 7 con requirepass, persistencia AOF y PVC de 10Gi en `sobel/infra=true` |
 | `03-backend.yaml` | `Service`, `Deployment` | 3 réplicas del backend API Gateway (`2Gi` RAM) en `sobel/apps=true` |
 | `04-split.yaml` | `Service`, `Deployment` | Particionado de imágenes (`2Gi` RAM) en `sobel/apps=true` |

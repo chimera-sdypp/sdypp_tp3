@@ -48,7 +48,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: worker
-          image: ghcr.io/chimera-sdypp/sobel-worker:1.0.0
+          image: ghcr.io/chimera-sdypp/sobel-worker:1.1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -70,7 +70,7 @@ spec:
             - name: SOBEL_OPERACIONES
               value: "sobel,grises,blur"
             - name: SOBEL_IMAGEN
-              value: "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
+              value: "ghcr.io/chimera-sdypp/sobel-worker:1.1.0"
             - name: SOBEL_TIMEOUT
               value: "60"
             - name: SOBEL_LIMITE_ENTREGAS
@@ -78,10 +78,10 @@ spec:
           resources:
             requests:
               cpu: 150m
-              memory: 256Mi
+              memory: 512Mi
             limits:
               cpu: 1000m
-              memory: 1024Mi
+              memory: 2048Mi
           readinessProbe:
             httpGet:
               path: /health

@@ -6,7 +6,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sobel-worker-caido
-  namespace: sobel
+  namespace: sobel-hit1
 spec:
   replicas: 1
   selector:
@@ -37,7 +37,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sobel-worker-colgado
-  namespace: sobel
+  namespace: sobel-hit1
 spec:
   replicas: 1
   selector:

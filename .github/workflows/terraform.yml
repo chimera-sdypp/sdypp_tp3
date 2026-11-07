@@ -77,8 +77,9 @@ jobs:
       id-token: write
     strategy:
       max-parallel: 1
+      # hit3/infra crea GKE, que gasta crédito mientras exista: se aplica sólo con la variable HIT3_ACTIVO=true.
       matrix:
-        dir: [hit2/infra, hit3/infra]
+        dir: ${{ fromJSON(vars.HIT3_ACTIVO == 'true' && '["hit2/infra", "hit3/infra"]' || '["hit2/infra"]') }}
     defaults:
       run:
         working-directory: ${{ matrix.dir }}

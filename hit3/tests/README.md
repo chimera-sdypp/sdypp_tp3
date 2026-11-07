@@ -21,7 +21,7 @@ El script [`test_e2e.sh`](test_e2e.sh) valida de manera totalmente desatendida y
 ### Prerrequisitos
 * `curl` y `python3` con librerías `numpy` y `Pillow`.
 * Clúster local k3s levantado con Traefik como Ingress Controller en el puerto local (default: `http://localhost`).
-* Workers activos para la imagen configurada (ej. `ghcr.io/chimera-sdypp/sobel-worker:1.0.0`).
+* Workers activos para la imagen configurada (ej. `ghcr.io/chimera-sdypp/sobel-worker:1.1.0`).
 
 ### Ejecución estándar contra clúster ya levantado
 ```bash
@@ -38,7 +38,7 @@ bash hit3/tests/test_e2e.sh --deploy
 bash hit3/tests/test_e2e.sh \
   --url "http://localhost:8080" \
   --namespace "sobel" \
-  --imagen "ghcr.io/chimera-sdypp/sobel-worker:1.0.0" \
+  --imagen "ghcr.io/chimera-sdypp/sobel-worker:1.1.0" \
   --timeout 240
 ```
 

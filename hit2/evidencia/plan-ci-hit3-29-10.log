@@ -1,0 +1,611 @@
+terraform init -backend-config="bucket=chimera-tp3-tfstate"
+shell: /usr/bin/bash -e {0}
+env:
+  TF_IN_AUTOMATION: 1
+  TF_INPUT: 0
+  TF_VAR_proyecto: chimera-tp3
+  TF_VAR_imagen: southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0
+  TF_VAR_ip_permitida: <IP de la casa>/32
+  TF_VAR_imagen_worker: 
+  CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-3db52cd2be3e995b.json
+  GOOGLE_APPLICATION_CREDENTIALS: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-3db52cd2be3e995b.json
+  GOOGLE_GHA_CREDS_PATH: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-3db52cd2be3e995b.json
+  CLOUDSDK_CORE_PROJECT: chimera-tp3
+  CLOUDSDK_PROJECT: chimera-tp3
+  GCLOUD_PROJECT: chimera-tp3
+  GCP_PROJECT: chimera-tp3
+  GOOGLE_CLOUD_PROJECT: chimera-tp3
+  TERRAFORM_CLI_PATH: /home/runner/work/_temp/2dbd88fe-cc6a-4f3e-b7d7-6bdf100e83bf
+Initializing the backend...
+
+Successfully configured the backend "gcs"! Terraform will automatically
+use this backend unless the backend configuration changes.
+Initializing provider plugins...
+- Reusing previous version of hashicorp/google from the dependency lock file
+- Installing hashicorp/google v6.50.0...
+- Installed hashicorp/google v6.50.0 (signed by HashiCorp)
+
+Terraform has been successfully initialized!
+terraform plan -lock-timeout=5m
+shell: /usr/bin/bash -e {0}
+env:
+  TF_IN_AUTOMATION: 1
+  TF_INPUT: 0
+  TF_VAR_proyecto: chimera-tp3
+  TF_VAR_imagen: southamerica-east1-docker.pkg.dev/chimera-tp3/sobel/sobel-hit1:1.0.0
+  TF_VAR_ip_permitida: <IP de la casa>/32
+  TF_VAR_imagen_worker: 
+  CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-3db52cd2be3e995b.json
+  GOOGLE_APPLICATION_CREDENTIALS: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-3db52cd2be3e995b.json
+  GOOGLE_GHA_CREDS_PATH: /home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-3db52cd2be3e995b.json
+  CLOUDSDK_CORE_PROJECT: chimera-tp3
+  CLOUDSDK_PROJECT: chimera-tp3
+  GCLOUD_PROJECT: chimera-tp3
+  GCP_PROJECT: chimera-tp3
+  GOOGLE_CLOUD_PROJECT: chimera-tp3
+  TERRAFORM_CLI_PATH: /home/runner/work/_temp/2dbd88fe-cc6a-4f3e-b7d7-6bdf100e83bf
+Acquiring state lock. This may take a few moments...
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # google_compute_instance_group_manager.workers will be created
+  + resource "google_compute_instance_group_manager" "workers" {
+      + base_instance_name             = "sobel-worker"
+      + creation_timestamp             = (known after apply)
+      + fingerprint                    = (known after apply)
+      + id                             = (known after apply)
+      + instance_group                 = (known after apply)
+      + instance_group_manager_id      = (known after apply)
+      + list_managed_instances_results = "PAGELESS"
+      + name                           = "sobel-workers"
+      + operation                      = (known after apply)
+      + project                        = "chimera-tp3"
+      + self_link                      = (known after apply)
+      + status                         = (known after apply)
+      + target_size                    = 0
+      + target_stopped_size            = (known after apply)
+      + target_suspended_size          = (known after apply)
+      + wait_for_instances             = false
+      + wait_for_instances_status      = "STABLE"
+      + zone                           = "southamerica-east1-a"
+
+      + instance_lifecycle_policy (known after apply)
+
+      + standby_policy (known after apply)
+
+      + update_policy (known after apply)
+
+      + version {
+          + instance_template = (known after apply)
+        }
+    }
+
+  # google_compute_instance_template.worker will be created
+  + resource "google_compute_instance_template" "worker" {
+      + can_ip_forward       = false
+      + creation_timestamp   = (known after apply)
+      + effective_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + id                   = (known after apply)
+      + machine_type         = "e2-standard-2"
+      + metadata             = {
+          + "enable-oslogin" = "TRUE"
+          + "startup-script" = <<-EOT
+                #!/bin/bash
+                # Bootstrap del worker del Hit #3: Docker, las URLs de conexión desde Secret Manager y el worker.
+                set -euo pipefail
+                if ! command -v docker >/dev/null; then
+                  apt-get update -q
+                  apt-get install -y -q docker.io
+                fi
+                gcloud auth configure-docker "" --quiet
+                secreto() { gcloud secrets versions access latest --secret="$1"; }
+                docker rm -f worker 2>/dev/null || true
+                docker run -d --name worker --restart unless-stopped --hostname "$(hostname)" \
+                  -e RABBITMQ_URL="$(secreto sobel-rabbitmq-url)" -e REDIS_URL="$(secreto sobel-redis-url)" \
+                  -e SOBEL_IMAGEN="" -p 8080:8080 ""
+            EOT
+        }
+      + metadata_fingerprint = (known after apply)
+      + name                 = (known after apply)
+      + name_prefix          = "sobel-worker-"
+      + numeric_id           = (known after apply)
+      + project              = "chimera-tp3"
+      + region               = (known after apply)
+      + self_link            = (known after apply)
+      + self_link_unique     = (known after apply)
+      + tags                 = [
+          + "sobel-worker",
+        ]
+      + tags_fingerprint     = (known after apply)
+      + terraform_labels     = {
+          + "goog-terraform-provisioned" = "true"
+        }
+
+      + confidential_instance_config (known after apply)
+
+      + disk {
+          + architecture           = (known after apply)
+          + auto_delete            = true
+          + boot                   = (known after apply)
+          + device_name            = (known after apply)
+          + disk_size_gb           = 10
+          + disk_type              = (known after apply)
+          + interface              = (known after apply)
+          + mode                   = (known after apply)
+          + provisioned_iops       = (known after apply)
+          + provisioned_throughput = (known after apply)
+          + source_image           = "debian-cloud/debian-12"
+          + type                   = (known after apply)
+        }
+
+      + network_interface {
+          + internal_ipv6_prefix_length = (known after apply)
+          + ipv6_access_type            = (known after apply)
+          + ipv6_address                = (known after apply)
+          + name                        = (known after apply)
+          + network                     = "default"
+          + stack_type                  = (known after apply)
+          + subnetwork                  = (known after apply)
+          + subnetwork_project          = (known after apply)
+        }
+
+      + scheduling (known after apply)
+
+      + service_account {
+          + email  = "sobel-worker-hit3@chimera-tp3.iam.gserviceaccount.com"
+          + scopes = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+        }
+
+      + shielded_instance_config {
+          + enable_integrity_monitoring = true
+          + enable_secure_boot          = true
+          + enable_vtpm                 = true
+        }
+    }
+
+  # google_compute_router.nat will be created
+  + resource "google_compute_router" "nat" {
+      + creation_timestamp = (known after apply)
+      + id                 = (known after apply)
+      + name               = "sobel-nat"
+      + network            = "default"
+      + project            = "chimera-tp3"
+      + region             = "southamerica-east1"
+      + self_link          = (known after apply)
+    }
+
+  # google_compute_router_nat.nat will be created
+  + resource "google_compute_router_nat" "nat" {
+      + auto_network_tier                   = (known after apply)
+      + drain_nat_ips                       = (known after apply)
+      + enable_dynamic_port_allocation      = (known after apply)
+      + enable_endpoint_independent_mapping = (known after apply)
+      + endpoint_types                      = (known after apply)
+      + icmp_idle_timeout_sec               = 30
+      + id                                  = (known after apply)
+      + min_ports_per_vm                    = (known after apply)
+      + name                                = "sobel-nat"
+      + nat_ip_allocate_option              = "AUTO_ONLY"
+      + nat_ips                             = (known after apply)
+      + project                             = "chimera-tp3"
+      + region                              = "southamerica-east1"
+      + router                              = "sobel-nat"
+      + source_subnetwork_ip_ranges_to_nat  = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+      + tcp_established_idle_timeout_sec    = 1200
+      + tcp_time_wait_timeout_sec           = 120
+      + tcp_transitory_idle_timeout_sec     = 30
+      + type                                = "PUBLIC"
+      + udp_idle_timeout_sec                = 30
+    }
+
+  # google_container_cluster.sobel will be created
+  + resource "google_container_cluster" "sobel" {
+      + cluster_ipv4_cidr                        = (known after apply)
+      + datapath_provider                        = (known after apply)
+      + default_max_pods_per_node                = (known after apply)
+      + deletion_protection                      = false
+      + disable_l4_lb_firewall_reconciliation    = false
+      + effective_labels                         = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + enable_cilium_clusterwide_network_policy = false
+      + enable_fqdn_network_policy               = false
+      + enable_intranode_visibility              = (known after apply)
+      + enable_kubernetes_alpha                  = false
+      + enable_l4_ilb_subsetting                 = false
+      + enable_legacy_abac                       = false
+      + enable_multi_networking                  = false
+      + enable_shielded_nodes                    = true
+      + endpoint                                 = (known after apply)
+      + id                                       = (known after apply)
+      + initial_node_count                       = 1
+      + label_fingerprint                        = (known after apply)
+      + location                                 = "southamerica-east1-a"
+      + logging_service                          = (known after apply)
+      + master_version                           = (known after apply)
+      + monitoring_service                       = (known after apply)
+      + name                                     = "sobel"
+      + network                                  = "default"
+      + networking_mode                          = "VPC_NATIVE"
+      + node_locations                           = (known after apply)
+      + node_version                             = (known after apply)
+      + operation                                = (known after apply)
+      + private_ipv6_google_access               = (known after apply)
+      + project                                  = (known after apply)
+      + remove_default_node_pool                 = true
+      + self_link                                = (known after apply)
+      + services_ipv4_cidr                       = (known after apply)
+      + subnetwork                               = (known after apply)
+      + terraform_labels                         = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + tpu_ipv4_cidr_block                      = (known after apply)
+
+      + addons_config (known after apply)
+
+      + anonymous_authentication_config (known after apply)
+
+      + authenticator_groups_config (known after apply)
+
+      + cluster_autoscaling (known after apply)
+
+      + confidential_nodes (known after apply)
+
+      + control_plane_endpoints_config (known after apply)
+
+      + cost_management_config (known after apply)
+
+      + database_encryption (known after apply)
+
+      + default_snat_status (known after apply)
+
+      + enterprise_config (known after apply)
+
+      + gateway_api_config (known after apply)
+
+      + gke_auto_upgrade_config (known after apply)
+
+      + identity_service_config (known after apply)
+
+      + ip_allocation_policy {
+          + cluster_ipv4_cidr_block       = (known after apply)
+          + cluster_secondary_range_name  = (known after apply)
+          + services_ipv4_cidr_block      = (known after apply)
+          + services_secondary_range_name = (known after apply)
+          + stack_type                    = "IPV4"
+
+          + pod_cidr_overprovision_config (known after apply)
+        }
+
+      + logging_config (known after apply)
+
+      + master_auth (known after apply)
+
+      + master_authorized_networks_config (known after apply)
+
+      + mesh_certificates (known after apply)
+
+      + monitoring_config (known after apply)
+
+      + node_config (known after apply)
+
+      + node_pool (known after apply)
+
+      + node_pool_auto_config (known after apply)
+
+      + node_pool_defaults (known after apply)
+
+      + notification_config (known after apply)
+
+      + pod_autoscaling (known after apply)
+
+      + rbac_binding_config (known after apply)
+
+      + release_channel {
+          + channel = "REGULAR"
+        }
+
+      + security_posture_config (known after apply)
+
+      + service_external_ips_config (known after apply)
+
+      + vertical_pod_autoscaling (known after apply)
+
+      + workload_identity_config {
+          + workload_pool = "chimera-tp3.svc.id.goog"
+        }
+    }
+
+  # google_container_node_pool.apps will be created
+  + resource "google_container_node_pool" "apps" {
+      + cluster                     = (known after apply)
+      + id                          = (known after apply)
+      + initial_node_count          = (known after apply)
+      + instance_group_urls         = (known after apply)
+      + location                    = (known after apply)
+      + managed_instance_group_urls = (known after apply)
+      + max_pods_per_node           = (known after apply)
+      + name                        = "apps"
+      + name_prefix                 = (known after apply)
+      + node_count                  = 2
+      + node_locations              = (known after apply)
+      + operation                   = (known after apply)
+      + project                     = "chimera-tp3"
+      + version                     = (known after apply)
+
+      + management (known after apply)
+
+      + network_config (known after apply)
+
+      + node_config {
+          + disk_size_gb     = (known after apply)
+          + disk_type        = (known after apply)
+          + effective_taints = (known after apply)
+          + image_type       = (known after apply)
+          + labels           = {
+              + "sobel/apps" = "true"
+            }
+          + local_ssd_count  = (known after apply)
+          + logging_variant  = (known after apply)
+          + machine_type     = "e2-standard-2"
+          + metadata         = (known after apply)
+          + min_cpu_platform = (known after apply)
+          + oauth_scopes     = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+          + preemptible      = false
+          + service_account  = "sobel-nodos@chimera-tp3.iam.gserviceaccount.com"
+          + spot             = false
+
+          + boot_disk (known after apply)
+
+          + confidential_nodes (known after apply)
+
+          + gcfs_config (known after apply)
+
+          + guest_accelerator (known after apply)
+
+          + kubelet_config (known after apply)
+
+          + linux_node_config (known after apply)
+
+          + shielded_instance_config (known after apply)
+
+          + windows_node_config (known after apply)
+
+          + workload_metadata_config {
+              + mode = "GKE_METADATA"
+            }
+        }
+
+      + upgrade_settings (known after apply)
+    }
+
+  # google_container_node_pool.infra will be created
+  + resource "google_container_node_pool" "infra" {
+      + cluster                     = (known after apply)
+      + id                          = (known after apply)
+      + initial_node_count          = (known after apply)
+      + instance_group_urls         = (known after apply)
+      + location                    = (known after apply)
+      + managed_instance_group_urls = (known after apply)
+      + max_pods_per_node           = (known after apply)
+      + name                        = "infra"
+      + name_prefix                 = (known after apply)
+      + node_count                  = 1
+      + node_locations              = (known after apply)
+      + operation                   = (known after apply)
+      + project                     = "chimera-tp3"
+      + version                     = (known after apply)
+
+      + management (known after apply)
+
+      + network_config (known after apply)
+
+      + node_config {
+          + disk_size_gb     = (known after apply)
+          + disk_type        = (known after apply)
+          + effective_taints = (known after apply)
+          + image_type       = (known after apply)
+          + labels           = {
+              + "sobel/infra" = "true"
+            }
+          + local_ssd_count  = (known after apply)
+          + logging_variant  = (known after apply)
+          + machine_type     = "e2-standard-2"
+          + metadata         = (known after apply)
+          + min_cpu_platform = (known after apply)
+          + oauth_scopes     = [
+              + "https://www.googleapis.com/auth/cloud-platform",
+            ]
+          + preemptible      = false
+          + service_account  = "sobel-nodos@chimera-tp3.iam.gserviceaccount.com"
+          + spot             = false
+
+          + boot_disk (known after apply)
+
+          + confidential_nodes (known after apply)
+
+          + gcfs_config (known after apply)
+
+          + guest_accelerator (known after apply)
+
+          + kubelet_config (known after apply)
+
+          + linux_node_config (known after apply)
+
+          + shielded_instance_config (known after apply)
+
+          + taint {
+              + effect = "NO_SCHEDULE"
+              + key    = "sobel/infra"
+              + value  = "true"
+            }
+
+          + windows_node_config (known after apply)
+
+          + workload_metadata_config {
+              + mode = "GKE_METADATA"
+            }
+        }
+
+      + upgrade_settings (known after apply)
+    }
+
+  # google_project_iam_member.nodos["roles/artifactregistry.reader"] will be created
+  + resource "google_project_iam_member" "nodos" {
+      + etag    = (known after apply)
+      + id      = (known after apply)
+      + member  = "serviceAccount:sobel-nodos@chimera-tp3.iam.gserviceaccount.com"
+      + project = "chimera-tp3"
+      + role    = "roles/artifactregistry.reader"
+    }
+
+  # google_project_iam_member.nodos["roles/logging.logWriter"] will be created
+  + resource "google_project_iam_member" "nodos" {
+      + etag    = (known after apply)
+      + id      = (known after apply)
+      + member  = "serviceAccount:sobel-nodos@chimera-tp3.iam.gserviceaccount.com"
+      + project = "chimera-tp3"
+      + role    = "roles/logging.logWriter"
+    }
+
+  # google_project_iam_member.nodos["roles/monitoring.metricWriter"] will be created
+  + resource "google_project_iam_member" "nodos" {
+      + etag    = (known after apply)
+      + id      = (known after apply)
+      + member  = "serviceAccount:sobel-nodos@chimera-tp3.iam.gserviceaccount.com"
+      + project = "chimera-tp3"
+      + role    = "roles/monitoring.metricWriter"
+    }
+
+  # google_project_iam_member.worker_lee_imagenes will be created
+  + resource "google_project_iam_member" "worker_lee_imagenes" {
+      + etag    = (known after apply)
+      + id      = (known after apply)
+      + member  = "serviceAccount:sobel-worker-hit3@chimera-tp3.iam.gserviceaccount.com"
+      + project = "chimera-tp3"
+      + role    = "roles/artifactregistry.reader"
+    }
+
+  # google_secret_manager_secret.conexion["sobel-rabbitmq-url"] will be created
+  + resource "google_secret_manager_secret" "conexion" {
+      + create_time           = (known after apply)
+      + deletion_protection   = false
+      + effective_annotations = (known after apply)
+      + effective_labels      = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + expire_time           = (known after apply)
+      + id                    = (known after apply)
+      + name                  = (known after apply)
+      + project               = "chimera-tp3"
+      + secret_id             = "sobel-rabbitmq-url"
+      + terraform_labels      = {
+          + "goog-terraform-provisioned" = "true"
+        }
+
+      + replication {
+          + auto {
+            }
+        }
+    }
+
+  # google_secret_manager_secret.conexion["sobel-redis-url"] will be created
+  + resource "google_secret_manager_secret" "conexion" {
+      + create_time           = (known after apply)
+      + deletion_protection   = false
+      + effective_annotations = (known after apply)
+      + effective_labels      = {
+          + "goog-terraform-provisioned" = "true"
+        }
+      + expire_time           = (known after apply)
+      + id                    = (known after apply)
+      + name                  = (known after apply)
+      + project               = "chimera-tp3"
+      + secret_id             = "sobel-redis-url"
+      + terraform_labels      = {
+          + "goog-terraform-provisioned" = "true"
+        }
+
+      + replication {
+          + auto {
+            }
+        }
+    }
+
+  # google_secret_manager_secret_iam_member.worker_lee["sobel-rabbitmq-url"] will be created
+  + resource "google_secret_manager_secret_iam_member" "worker_lee" {
+      + etag      = (known after apply)
+      + id        = (known after apply)
+      + member    = "serviceAccount:sobel-worker-hit3@chimera-tp3.iam.gserviceaccount.com"
+      + project   = (known after apply)
+      + role      = "roles/secretmanager.secretAccessor"
+      + secret_id = (known after apply)
+    }
+
+  # google_secret_manager_secret_iam_member.worker_lee["sobel-redis-url"] will be created
+  + resource "google_secret_manager_secret_iam_member" "worker_lee" {
+      + etag      = (known after apply)
+      + id        = (known after apply)
+      + member    = "serviceAccount:sobel-worker-hit3@chimera-tp3.iam.gserviceaccount.com"
+      + project   = (known after apply)
+      + role      = "roles/secretmanager.secretAccessor"
+      + secret_id = (known after apply)
+    }
+
+  # google_service_account.nodos will be created
+  + resource "google_service_account" "nodos" {
+      + account_id   = "sobel-nodos"
+      + disabled     = false
+      + display_name = "Nodos de GKE"
+      + email        = "sobel-nodos@chimera-tp3.iam.gserviceaccount.com"
+      + id           = (known after apply)
+      + member       = "serviceAccount:sobel-nodos@chimera-tp3.iam.gserviceaccount.com"
+      + name         = (known after apply)
+      + project      = "chimera-tp3"
+      + unique_id    = (known after apply)
+    }
+
+  # google_service_account.worker will be created
+  + resource "google_service_account" "worker" {
+      + account_id   = "sobel-worker-hit3"
+      + disabled     = false
+      + display_name = "Workers del Hit #3"
+      + email        = "sobel-worker-hit3@chimera-tp3.iam.gserviceaccount.com"
+      + id           = (known after apply)
+      + member       = "serviceAccount:sobel-worker-hit3@chimera-tp3.iam.gserviceaccount.com"
+      + name         = (known after apply)
+      + project      = "chimera-tp3"
+      + unique_id    = (known after apply)
+    }
+
+Plan: 17 to add, 0 to change, 0 to destroy.
+
+Changes to Outputs:
+  + cluster       = "sobel"
+  + grupo_workers = "sobel-workers"
+  + zona          = "southamerica-east1-a"
+Removed exported credentials at "/home/runner/work/sdypp_tp3/sdypp_tp3/gha-creds-3db52cd2be3e995b.json".
+[command]/usr/bin/git version
+git version 2.56.0
+Temporarily overriding HOME='/home/runner/work/_temp/efba5288-be1b-4f49-8050-ea12bbcaf92a' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+[command]/usr/bin/git config --global --add safe.directory /home/runner/work/sdypp_tp3/sdypp_tp3
+[command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+[command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+[command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+http.https://github.com/.extraheader
+[command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+[command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+[command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+[command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, google-github-actions/auth@v2, hashicorp/setup-terraform@v3. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

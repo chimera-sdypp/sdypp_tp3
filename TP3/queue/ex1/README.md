@@ -1,5 +1,7 @@
 # Hit #0 — Ejemplo 1: Message Queue (Punto a Punto)
 
+Video: [hit0-ex1-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/hit0-ex1-demo.mp4).
+
 Este módulo implementa el patrón **Message Queue (Punto a Punto)** utilizando **RabbitMQ** (protocolo AMQP 0-9-1) y Python (`pika`).
 
 ---
@@ -42,6 +44,10 @@ flowchart LR
 ---
 
 ## 3. Instrucciones de Ejecución
+
+> **Credenciales:** el usuario y la contraseña de RabbitMQ salen de `TP3/queue/.env`, que no se versiona.
+> La primera vez: `cp ../.env.example ../.env` y cambiar la contraseña. En Kubernetes, el mismo archivo se carga
+> como Secret antes de aplicar los manifiestos: `kubectl create secret generic rabbitmq-credenciales --from-env-file=../.env`
 
 ### Opción A — Ejecución Automatizada Local (Recomendada)
 Se incluye un script bash que realiza todo el flujo de demostración automáticamente:

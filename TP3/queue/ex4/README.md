@@ -1,5 +1,7 @@
 # Hit #0 — Ejemplo 4: Retry con Exponential Backoff
 
+Video: [hit0-ex4-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/hit0-ex4-demo.mp4).
+
 Este módulo implementa el patrón **Retry con Exponential Backoff** sobre **RabbitMQ** (protocolo AMQP 0-9-1) y Python (`pika`), usando **TTL de cola + colas de espera** para el delay y la **DLQ del ejemplo 3** como destino final.
 
 ---
@@ -72,6 +74,10 @@ Secuencia de un mensaje que falla siempre:
 
 ## 3. Instrucciones de Ejecución
 
+> **Credenciales:** el usuario y la contraseña de RabbitMQ salen de `TP3/queue/.env`, que no se versiona.
+> La primera vez: `cp ../.env.example ../.env` y cambiar la contraseña. En Kubernetes, el mismo archivo se carga
+> como Secret antes de aplicar los manifiestos: `kubectl create secret generic rabbitmq-credenciales --from-env-file=../.env`
+
 ### Opción A — Ejecución Automatizada Local (Recomendada)
 ```bash
 cd TP3/queue/ex4
@@ -98,7 +104,7 @@ cd TP3/queue/ex4
    docker compose logs dlq-consumer
    ```
 
-4. **Ver las colas de espera** (o en la UI http://localhost:15672, guest/guest; durante la corrida se ven los mensajes pasar por las colas `wait.*`):
+4. **Ver las colas de espera** (o en la UI http://localhost:15672, con el usuario de `TP3/queue/.env`; durante la corrida se ven los mensajes pasar por las colas `wait.*`):
    ```bash
    docker compose exec rabbitmq rabbitmqctl list_queues name arguments messages
    ```

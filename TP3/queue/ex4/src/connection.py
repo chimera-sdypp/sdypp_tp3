@@ -16,8 +16,8 @@ def get_rabbitmq_connection(max_retries=15, retry_interval=2):
     """Establece conexión con RabbitMQ con reintentos para entornos distribuidos / contenedores."""
     host = os.getenv("RABBITMQ_HOST", "localhost")
     port = int(os.getenv("RABBITMQ_PORT", "5672"))
-    user = os.getenv("RABBITMQ_USER", "guest")
-    password = os.getenv("RABBITMQ_PASS", "guest")
+    user = os.environ["RABBITMQ_USER"]
+    password = os.environ["RABBITMQ_PASS"]
 
     credentials = pika.PlainCredentials(user, password)
     parameters = pika.ConnectionParameters(

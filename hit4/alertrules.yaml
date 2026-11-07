@@ -42,7 +42,7 @@ spec:
         # ----------------------------------------------------------------------
         - alert: SobelColaSaturada
           # Expresión PromQL: monitorea tanto el exporter de RabbitMQ como la métrica de negocio
-          expr: rabbitmq_queue_messages{queue=~"sobel\\..*"} > 50 or max(sobel_tareas_en_cola) by (cola) > 50
+          expr: rabbitmq_queue_messages{queue=~"sobel\\..*"} > 50
           # Ventana de persistencia: la condición debe mantenerse 1 minuto continuo para no disparar por picos
           for: 1m
           labels:

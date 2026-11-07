@@ -184,7 +184,7 @@ def test_un_archivo_que_no_se_decodifica_deja_el_job_en_failed_sin_publicar_nada
         "tipo": "ARCHIVO_INVALIDO", "mensaje": "el archivo 1 no se pudo decodificar"}
     assert redis.hget("job:j1", "terminado") == b"1761055392500"
     assert redis.lrange("terminados", 0, -1) == [b"failed 1500"]
-    assert canal.eventos == []
+    assert [e for e in canal.eventos if e[0] == "publicar"] == []
 
 
 def test_terminados_guarda_solo_los_ultimos_1000(redis):
@@ -207,7 +207,7 @@ def test_un_archivo_que_pasa_el_doble_del_limite_de_pillow_tambien_deja_el_job_e
     split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(canal, b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "estado") == b"failed"
-    assert canal.eventos == []
+    assert [e for e in canal.eventos if e[0] == "publicar"] == []
 
 
 def foto(redis):
@@ -234,7 +234,7 @@ def test_un_job_que_ya_no_esta_en_cola_no_se_reparte_de_nuevo(redis, estado, con
     split.manejador(redis, partes=2)(canal, b'{"job_id": "j1"}')
 
     assert foto(redis) == antes
-    assert canal.eventos == []
+    assert [e for e in canal.eventos if e[0] == "publicar"] == []
 
 
 def test_un_job_inexistente_avisa_y_no_toca_nada(redis, caplog):
@@ -245,7 +245,7 @@ def test_un_job_inexistente_avisa_y_no_toca_nada(redis, caplog):
     split.manejador(redis, partes=2, log=logging.getLogger("test"))(canal, b'{"job_id": "vencido"}')
 
     assert foto(redis) == antes
-    assert canal.eventos == []
+    assert [e for e in canal.eventos if e[0] == "publicar"] == []
     avisos = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert avisos == ["job vencido no existe (venció o el backend no lo terminó de crear), se descarta"]
 
@@ -378,3 +378,70 @@ def test_un_job_que_va_a_la_dlq_cuenta_como_error(redis):
         split.manejador(redis, partes=2)(CanalQuePublica(), b"no es json")
 
     assert diferencia(antes) == [0, 1, 0, 0]
+
+
+def test_calcular_partes_dinamicas_imagen_chica(redis):
+    # Imagen chica (< 0.5 MB): 1 o 2 partes
+    chica = np.zeros((100, 100, 3), dtype=np.uint8)
+    assert split.calcular_partes(chica, redis) == 1
+
+    algo_mayor = np.zeros((200, 200, 3), dtype=np.uint8)
+    assert split.calcular_partes(algo_mayor, redis) == 2
+
+
+def test_calcular_partes_dinamicas_segun_workers_y_dimensiones(redis):
+    # Sin workers activos en Redis: fallback a 2
+    mediana = np.zeros((1200, 1200, 3), dtype=np.uint8)  # ~4.1 MB
+    assert split.calcular_partes(mediana, redis) == 2
+
+    # Con 4 workers activos en Redis
+    for i in range(4):
+        redis.hset(f"worker:w{i}", "host", f"w{i}")
+    assert split.calcular_partes(mediana, redis) == 4
+
+
+def test_calcular_partes_dinamicas_imagen_gigante(redis):
+    # Imagen grande/gigante (> 40 MB)
+    gigante = np.zeros((5000, 3000, 3), dtype=np.uint8)  # ~43 MB
+    partes = split.calcular_partes(gigante, redis)
+    assert 16 <= partes <= 32
+
+
+def test_calcular_partes_fijas_override(redis):
+    matriz = np.zeros((5000, 3000, 3), dtype=np.uint8)
+    assert split.calcular_partes(matriz, redis, partes_fijas=4) == 4
+
+
+
+class CanalDeRabbit(CanalQuePublica):
+    """Como RabbitMQ: un queue_declare pasivo de una cola que no existe cierra el canal."""
+
+    def __init__(self):
+        super().__init__()
+        self.colas, self.cerrado = set(), False
+
+    def queue_declare(self, queue, durable=False, arguments=None, passive=False):
+        if self.cerrado:
+            raise RuntimeError("canal cerrado")
+        if passive:
+            if queue not in self.colas:
+                self.cerrado = True
+                raise RuntimeError("NOT_FOUND: el broker cierra el canal")
+            return type("Declarada", (), {"method": type("M", (), {"message_count": 0})()})()
+        self.colas.add(queue)
+        super().queue_declare(queue, durable, arguments)
+
+    def basic_publish(self, exchange, routing_key, body, properties=None):
+        if self.cerrado:
+            raise RuntimeError("canal cerrado")
+        super().basic_publish(exchange, routing_key, body, properties)
+
+
+def test_con_partes_dinamicas_la_cola_se_declara_antes_de_medirla(redis):
+    cargar_job(redis, "j1", [png(imagen_rgb(400, 600))])
+    canal = CanalDeRabbit()
+    split.manejador(redis, partes=0)(canal, b'{"job_id": "j1"}')
+    assert not canal.cerrado
+    assert canal.eventos[0] == ("declarar", f"sobel.tareas.{IMAGEN}")
+    assert [e[0] for e in canal.eventos[1:]] == ["publicar"] * int(redis.hget("job:j1", "fragmentos_total"))
+    assert redis.hget("job:j1", "estado") == b"processing"

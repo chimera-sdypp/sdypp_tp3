@@ -1,5 +1,7 @@
 # Hit #0 — Ejemplo 2: Event Bus / Pub-Sub (Fan-out)
 
+Video: [hit0-ex2-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/hit0-ex2-demo.mp4).
+
 Este módulo implementa el patrón **Publicador/Suscriptor (Pub-Sub)** mediante un **Exchange de tipo Fan-out** en **RabbitMQ** (protocolo AMQP 0-9-1) utilizando Python (`pika`).
 
 ---
@@ -45,6 +47,10 @@ flowchart LR
 ---
 
 ## 4. Instrucciones de Ejecución
+
+> **Credenciales:** el usuario y la contraseña de RabbitMQ salen de `TP3/queue/.env`, que no se versiona.
+> La primera vez: `cp ../.env.example ../.env` y cambiar la contraseña. En Kubernetes, el mismo archivo se carga
+> como Secret antes de aplicar los manifiestos: `kubectl create secret generic rabbitmq-credenciales --from-env-file=../.env`
 
 ### Opción A — Ejecución Automatizada Local (Recomendada)
 ```bash
