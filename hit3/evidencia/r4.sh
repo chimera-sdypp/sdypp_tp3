@@ -10,7 +10,7 @@ set -euo pipefail
 
 URL="${1:-http://localhost}"
 NS="${SOBEL_NAMESPACE:-sobel}"
-IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.1.0}"
+IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.1.1}"
 PEDIDOS=30
 CUERPO=$(mktemp)
 PNG=$(mktemp --suffix=.png)

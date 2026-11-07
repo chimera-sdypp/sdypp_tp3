@@ -1,0 +1,466 @@
+[
+ {
+  "fase": "V2 · matriz",
+  "VA": 10,
+  "VB": 2,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 28,
+  "post_ms": [
+   304,
+   524,
+   0
+  ],
+  "job_s": [
+   20.91,
+   23.84,
+   0.0
+  ],
+  "req_s": 7.94,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V2 · matriz",
+  "VA": 10,
+  "VB": 2,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "sí",
+  "jobs": 29,
+  "post_ms": [
+   375,
+   508,
+   0
+  ],
+  "job_s": [
+   24.84,
+   52.33,
+   0.0
+  ],
+  "req_s": 8.49,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V2 · matriz",
+  "VA": 10,
+  "VB": 3,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 24,
+  "post_ms": [
+   383,
+   725,
+   0
+  ],
+  "job_s": [
+   22.49,
+   26.49,
+   0.0
+  ],
+  "req_s": 7.97,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V2 · matriz",
+  "VA": 1,
+  "VB": 1,
+  "VC": 1,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 24,
+  "post_ms": [
+   53,
+   78,
+   0
+  ],
+  "job_s": [
+   0.34,
+   0.44,
+   0.0
+  ],
+  "req_s": 1.76,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V2 · matriz",
+  "VA": 1,
+  "VB": 1,
+  "VC": 50,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 215,
+  "post_ms": [
+   135,
+   393,
+   0
+  ],
+  "job_s": [
+   11.52,
+   15.47,
+   0.0
+  ],
+  "req_s": 43.31,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V2 · matriz",
+  "VA": 1,
+  "VB": 2,
+  "VC": 10,
+  "V1": "10mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 12,
+  "post_ms": [
+   254,
+   514,
+   0
+  ],
+  "job_s": [
+   60.67,
+   60.92,
+   0.0
+  ],
+  "req_s": 9.12,
+  "errores_pct": 100,
+  "nota": "",
+  "slo": [
+   true,
+   false,
+   false
+  ],
+  "resultado": "NO CUMPLE (job, errores)"
+ },
+ {
+  "fase": "V2 · matriz",
+  "VA": 1,
+  "VB": 2,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 130,
+  "post_ms": [
+   96,
+   209,
+   0
+  ],
+  "job_s": [
+   1.42,
+   2.35,
+   0.0
+  ],
+  "req_s": 11.67,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V2 · matriz",
+  "VA": 50,
+  "VB": 1,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 6,
+  "post_ms": [
+   2807,
+   6513,
+   0
+  ],
+  "job_s": [
+   46.27,
+   65.42,
+   0.0
+  ],
+  "req_s": 8.36,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   false,
+   true,
+   true
+  ],
+  "resultado": "NO CUMPLE (POST)"
+ },
+ {
+  "fase": "V1 · tamaño",
+  "VA": 1,
+  "VB": 1,
+  "VC": 1,
+  "V1": "100mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 3,
+  "post_ms": [
+   1508,
+   1593,
+   0
+  ],
+  "job_s": [
+   24.35,
+   24.99,
+   0.0
+  ],
+  "req_s": 0.96,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   false,
+   true,
+   true
+  ],
+  "resultado": "NO CUMPLE (POST)"
+ },
+ {
+  "fase": "V1 · tamaño",
+  "VA": 1,
+  "VB": 1,
+  "VC": 1,
+  "V1": "10mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 14,
+  "post_ms": [
+   201,
+   293,
+   0
+  ],
+  "job_s": [
+   2.57,
+   3.07,
+   0.0
+  ],
+  "req_s": 1.2,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V1 · tamaño",
+  "VA": 1,
+  "VB": 1,
+  "VC": 1,
+  "V1": "1kb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 37,
+  "post_ms": [
+   77,
+   101,
+   0
+  ],
+  "job_s": [
+   0.11,
+   0.13,
+   0.0
+  ],
+  "req_s": 1.79,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V1 · tamaño",
+  "VA": 1,
+  "VB": 1,
+  "VC": 1,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 37,
+  "post_ms": [
+   98,
+   124,
+   0
+  ],
+  "job_s": [
+   0.38,
+   0.52,
+   0.0
+  ],
+  "req_s": 1.71,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V1 · tamaño",
+  "VA": 1,
+  "VB": 1,
+  "VC": 1,
+  "V1": "50mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 4,
+  "post_ms": [
+   925,
+   1180,
+   0
+  ],
+  "job_s": [
+   12.52,
+   12.71,
+   0.0
+  ],
+  "req_s": 0.97,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   false,
+   true,
+   true
+  ],
+  "resultado": "NO CUMPLE (POST)"
+ },
+ {
+  "fase": "V3",
+  "VA": 10,
+  "VB": 2,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 2,
+  "falla": "",
+  "jobs": 23,
+  "post_ms": [
+   267,
+   466,
+   0
+  ],
+  "job_s": [
+   24.13,
+   26.34,
+   0.0
+  ],
+  "req_s": 7.92,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V3",
+  "VA": 10,
+  "VB": 2,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 4,
+  "falla": "",
+  "jobs": 26,
+  "post_ms": [
+   278,
+   483,
+   0
+  ],
+  "job_s": [
+   27.74,
+   29.25,
+   0.0
+  ],
+  "req_s": 7.61,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ },
+ {
+  "fase": "V3",
+  "VA": 10,
+  "VB": 2,
+  "VC": 10,
+  "V1": "1mb",
+  "V3": 8,
+  "falla": "",
+  "jobs": 20,
+  "post_ms": [
+   350,
+   579,
+   0
+  ],
+  "job_s": [
+   31.05,
+   38.4,
+   0.0
+  ],
+  "req_s": 7.36,
+  "errores_pct": 0,
+  "nota": "",
+  "slo": [
+   true,
+   true,
+   true
+  ],
+  "resultado": "CUMPLE"
+ }
+]

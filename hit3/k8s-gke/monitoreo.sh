@@ -13,7 +13,26 @@ python3 - "$RAIZ/hit4/dashboards/sobel-dashboard.json" "$NS" > /tmp/dashboard-$N
 import json, re, sys
 d = json.load(open(sys.argv[1])); ns = sys.argv[2]
 d["uid"], d["title"] = f"{ns}-hit4", f"Chimera — Sobel distribuido (Hit #4, namespace {ns})"
-print(re.sub(r'namespace(\\?)=(~?)(\\?)"sobel', rf'namespace\1=\2\3"{ns}', json.dumps(d, ensure_ascii=False)))
+
+def filtrar(expr):
+    # En un cluster compartido, toda métrica de RabbitMQ o de nuestros servicios se filtra por nuestro namespace.
+    expr = re.sub(r'namespace=(~?)"sobel"', rf'namespace=\1"{ns}"', expr)
+    def con_ns(m):
+        nombre, etiquetas = m.group(1), m.group(2)
+        if etiquetas is None:
+            return f'{nombre}{{namespace="{ns}"}}'
+        return m.group(0) if "namespace" in etiquetas else f'{nombre}{{namespace="{ns}",{etiquetas[1:]}'
+    return re.sub(r'\b((?:rabbitmq|sobel)_[a-z_]+)(\{[^}]*\})?', con_ns, expr)
+
+def recorrer(nodo):
+    if isinstance(nodo, dict):
+        for k, v in nodo.items():
+            nodo[k] = filtrar(v) if k in ("expr", "query") and isinstance(v, str) else recorrer(v)
+    elif isinstance(nodo, list):
+        return [recorrer(x) for x in nodo]
+    return nodo
+
+print(json.dumps(recorrer(d), ensure_ascii=False))
 PY
 kubectl create configmap "$NS-dashboard" -n "$NS" --from-file="$NS.json=/tmp/dashboard-$NS.json" --dry-run=client -o yaml \
   | kubectl label --local -f - grafana_dashboard=1 -o yaml | kubectl apply -f -
