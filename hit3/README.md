@@ -17,6 +17,11 @@ O desde el navegador en `http://localhost/`: se pega el token, se suben las imá
 La API completa, los errores y las interfaces entre servicios están en el [contrato](contrato.md); el despliegue,
 en [k8s/](k8s/README.md); la observabilidad, en el [Hit #4](../hit4/README.md).
 
+En la nube corre en el GKE `tp3` del proyecto `tp3distribuidos` (compartido con otro grupo), en el namespace
+`chimera-sobel` y un node pool propio (`chimera`): <http://8.232.111.42> (`/health`). Se despliega con
+[`k8s-gke/`](k8s-gke/kustomization.yaml) y el monitoreo con [`k8s-gke/monitoreo.sh`](k8s-gke/monitoreo.sh); un token
+para la página o la API sale de `kubectl -n chimera-sobel exec deploy/backend -- python -m backend.emitir_token <usuario> <usuario|admin> --horas 24`.
+
 Tests: `pytest` en cada carpeta de servicio, y `pytest -m integracion` con `RABBITMQ_URL` y `REDIS_URL`.
 Evidencia: [`evidencia/r1.sh`](evidencia/r1.sh) (registry privado), [`evidencia/r4.sh`](evidencia/r4.sh) (roles y
 réplicas sin estado), [`evidencia/r_dlq.sh`](evidencia/r_dlq.sh) (falla provocada: reintentos → DLQ → agotados →
