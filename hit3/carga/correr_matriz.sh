@@ -58,14 +58,16 @@ determinar_k6() {
   echo "[INFO] k6: ${K6_CMD[*]}"
 }
 
-# Workers listos ahora (V3 de la celda). Sin kubectl se toma $V3 tal cual.
+# Workers listos ahora (V3 de la celda). Si V3 está definido se toma tal cual; si no, consulta kubectl.
 workers_listos() {
   local listos
-  if command -v kubectl &> /dev/null &&
+  if [ -n "${V3:-}" ]; then
+    echo "$V3"
+  elif command -v kubectl &> /dev/null &&
      listos=$(kubectl -n "$NAMESPACE" get deploy "$DEPLOY_WORKER" -o jsonpath='{.status.readyReplicas}' 2>/dev/null); then
     echo "${listos:-0}"  # sin réplicas listas, k8s omite el campo
   else
-    echo "${V3:-?}"
+    echo "?"
   fi
 }
 
@@ -136,7 +138,7 @@ generar_informe() {
   for archivo in "$CORRIDA"/celda_*.json; do
     [ -e "$archivo" ] || continue
     # --summary-export guarda cada métrica plana: {"p(95)": …} en Trend, {"value": …} en Rate y {"rate": …} en Counter.
-    python3 - "$archivo" "$DIR_SCRIPT/datos" >> "$informe" <<'EOF'
+    python3 - "$archivo" "datos" >> "$informe" <<'EOF'
 import json, os, re, sys
 archivo, datos = sys.argv[1], sys.argv[2]
 m = json.load(open(archivo))["metrics"]
@@ -211,6 +213,9 @@ case "${1:-ayuda}" in
     ;;
   --v1)
     asegurar_datos; determinar_k6; correr_v1; generar_informe
+    ;;
+  --informe)
+    generar_informe
     ;;
   *)
     sed -n '6,11p' "$0" | sed 's/^# \?//'

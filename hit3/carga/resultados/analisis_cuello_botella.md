@@ -2,53 +2,64 @@
 **Sistemas Distribuidos y Programación Paralela — Grupo Cerberus**  
 **Autor:** Salvador Baez (`Salva`)  
 **Fecha de Ensayos:** 07 de Noviembre de 2026  
-**Versión de Despliegue:** `1.1.0` (Rama `dev`, Commit `01b2fca` / `7d4d1cd`)
+**Versión de Despliegue:** `1.1.0` (`ghcr.io/chimera-sdypp/sobel-*:1.1.0`)
 
 ---
 
-## 1. Justificación del Entorno de Ejecución Local y Hardware
+## 1. Entornos de Ejecución Evaluados (Nube GKE y Clúster Local)
 
-### 1.1 Indisponibilidad de Google Cloud Platform (GCP)
-El plan inicial del Grupo Cerberus contemplaba la ejecución de las corridas finales sobre el clúster gestionado de Kubernetes en GCP aprovisionado con Terraform (`hit3/infra/`). Sin embargo, el **04/11/2026 el Prof. Ponti desactivó la facturación del proyecto institucional**, provocando el apagado preventivo de las instancias y cuotas de red. En cumplimiento estricto con las directivas de la cátedra de no simular ni falsear ningún resultado, **la totalidad de las pruebas de carga k6 se ejecutaron de manera local, genuina y reproducible** sobre el clúster bare-metal de desarrollo.
+Las pruebas se ejecutaron de manera real sobre **ambos entornos** (clúster público en la nube y clúster local):
 
-### 1.2 Especificaciones del Nodo Físico de Evaluación
-Las mediciones se ejecutaron sobre la máquina física de Salvador Baez, actuando como nodo único de Kubernetes (control-plane y worker unificado):
+### 1.1 Clúster Público en la Nube (GKE)
+* **Endpoint Público de la API (Ingress):** `http://8.232.111.42/`
+* **Grafana Público:** `http://136.80.214.178/d/chimera-sobel-hit4` (namespace `chimera-sobel`)
+* **Topología de Nodos (4 nodos de 2 vCPUs y ~8 GB RAM cada uno):**
+  * `gke-tp3-apps-58bb8929-q8l7` (`10.128.15.218`) — 2 vCPUs, 8.33 GB RAM
+  * `gke-tp3-infra-7d17185a-9gxq` (`10.128.15.219`) — 2 vCPUs, 8.33 GB RAM
+  * `gke-tp3-chimera-e34b9320-wq0l` (`10.128.15.230`) — 2 vCPUs, 8.33 GB RAM
+  * `gke-tp3-chimera-e34b9320-fsff` (`10.128.15.231`) — 2 vCPUs, 8.33 GB RAM
+* **Réplicas Activas en `chimera-sobel` (v1.1.0):**
+  * `backend`: 3 réplicas (`backend-7f9f79fddb-2qpvx`, `backend-7f9f79fddb-7q5hh`, `backend-7f9f79fddb-qtj2f`)
+  * `rabbitmq`: 3 réplicas (`rabbitmq-0`, `rabbitmq-1`, `rabbitmq-2`)
+  * `sobel-worker`: 2 réplicas (`sobel-worker-86bfbbcc67-m4d2w`, `sobel-worker-86bfbbcc67-whn5g`)
+  * `joiner`: 2 réplicas (`joiner-5489fb4bd5-79725`, `joiner-5489fb4bd5-bn66j`)
+  * `split`: 1 réplica (`split-76459864b-mjrfs`)
+  * `reasignador`: 1 réplica (`reasignador-6b755f68fc-7zwjd`)
+  * `frontend`: 1 réplica (`frontend-77cc4769b8-vrjw7`)
+  * `redis`: 1 réplica (`redis-0`)
 
-* **Procesador (CPU):** AMD Ryzen 5 5600G with Radeon Graphics (6 núcleos físicos, 12 hilos lógicos, frecuencia base 3.90 GHz, reloj boost hasta 4.40 GHz).
-* **Memoria RAM:** 16.00 GB DDR4 (con 7.6 GiB asignados al pool de Kubernetes vía WSL2).
-* **Sistema Operativo:** Microsoft Windows 11 Home 64 bits (Build 26100), ejecutando Docker Desktop con backend WSL2 (Linux Kernel 5.15).
-* **Orquestador:** Kind (Kubernetes v1.31.2) sobre el clúster `sobel-cluster` con etiquetas de nodo `sobel/infra=true` y `sobel/apps=true`.
-* **Microservicios Desplegados (v1.1.0):**
-  * `backend` (3 réplicas): `ghcr.io/chimera-sdypp/sobel-backend:1.1.0`
-  * `split` (1 réplica): `ghcr.io/chimera-sdypp/sobel-split:1.1.0`
-  * `sobel-worker` (escalable 2, 4, 8 réplicas): `ghcr.io/chimera-sdypp/sobel-worker:1.1.0`
-  * `joiner` (2 réplicas): `ghcr.io/chimera-sdypp/sobel-joiner:1.1.0`
-  * `reasignador` (1 réplica): `ghcr.io/chimera-sdypp/sobel-reasignador:1.1.0`
-  * `frontend` (1 réplica): `ghcr.io/chimera-sdypp/sobel-frontend:1.1.0`
-  * `rabbitmq` (StatefulSet de 3 réplicas Quorum / Raft): `rabbitmq:4-management`
-  * `redis` (StatefulSet de 1 réplica): `redis:7-alpine`
-  * `observabilidad`: `kube-prometheus-stack` (Prometheus Server, Alertmanager, Node Exporter, Kube-State-Metrics) y Grafana v13.3.0.
+### 1.2 Clúster Local (`kind-sobel-cluster`)
+Utilizado para la matriz base local y las pruebas de escalado horizontal de `V3` (2, 4 y 8 workers con `kubectl scale`):
+* **Procesador (CPU):** AMD Ryzen 5 5600G with Radeon Graphics (6 núcleos físicos, 12 hilos lógicos, 3.90 GHz base).
+* **Memoria RAM:** 16.00 GB DDR4 (7.6 GiB asignados a WSL2 / Docker Desktop).
+* **Sistema Operativo:** Windows 11 Home 64 bits (Build 26100) + WSL2 Linux Kernel 5.15 + Kind (Kubernetes v1.31.2).
 
 ---
 
-## 2. Barrido de Calibre de Archivo — Dimensión V1 (1 KB a 100 MB)
+## 2. Barrido de Tamaño de Archivo — Dimensión V1 (1 KB a 100 MB)
 
-### 2.1 Metodología de Ensayo
-Se ejecutó el barrido de la dimensión $V_1$ mediante el comando estandarizado del runner:
+Se ejecutó el barrido de la dimensión $V_1$ ($V_A=1, V_B=1, V_C=1, V_3=2$, rampa 5 s, meseta 30 s) tanto contra el endpoint público en la nube como en el clúster local:
+
 ```bash
-TARGET_URL=http://localhost ./correr_matriz.sh --v1
+TARGET_URL=http://8.232.111.42/ ./correr_matriz.sh --v1
+TARGET_URL=http://localhost/ ./correr_matriz.sh --v1
 ```
-Bajo los parámetros del contrato §8:
-* $V_A = 1$ archivo por petición.
-* $V_B = 1$ operación de pipeline (`sobel`).
-* $V_C = 1$ usuario virtual (VU) con tráfico continuo.
-* $V_3 = 2$ workers activos.
-* Rampa de aceleración: 5 s; Meseta sostenida: 30 s por calibre.
 
-### 2.2 Resultados Experimentales Obtenidos
-Directorio de artefactos crudos: `hit3/carga/resultados/20261107_143830/`
+### 2.1 Resultados de V1 en la Nube (`http://8.232.111.42`)
+Artefactos en `hit3/carga/resultados/nube_v1/` (`informe.md`):
 
-| Calibre ($V_1$) | Archivos ($V_A$) | Ops ($V_B$) | VUs ($V_C$) | Workers ($V_3$) | p95 POST /jobs (ms) | p95 Total Job (s) | Umbral SLO 2 | Tasa Errores (%) | Throughput (req/s) | Dictamen SLO |
+| Calibre ($V_1$) | Archivos ($V_A$) | Ops ($V_B$) | VUs ($V_C$) | Workers ($V_3$) | p95 POST /jobs (ms) | p95 Total Job (s) | Umbral SLO 2 | Errores (%) | Req/s | Resultado |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **1 KB** | 1 | 1 | 1 | 2 | **230 ms** | **0.08 s** | $\le 30\text{ s}$ | 0.00% | 1.38 | **CUMPLE** |
+| **1 MB** | 1 | 1 | 1 | 2 | **1,391 ms** | **0.38 s** | $\le 30\text{ s}$ | 0.00% | 0.87 | **NO CUMPLE** |
+| **10 MB** | 1 | 1 | 1 | 2 | **2,411 ms** | **3.14 s** | $\le 30\text{ s}$ | 0.00% | 0.69 | **NO CUMPLE** |
+| **50 MB** | 1 | 1 | 1 | 2 | **5,952 ms** | **13.95 s** | $\le 120\text{ s}$ | 0.00% | 0.64 | **NO CUMPLE** |
+| **100 MB** | 1 | 1 | 1 | 2 | **9,665 ms** | **25.44 s** | $\le 120\text{ s}$ | 0.00% | 0.63 | **NO CUMPLE** |
+
+### 2.2 Resultados de V1 en Local (`http://localhost`)
+Artefactos en `hit3/carga/resultados/20261107_143830/` (`informe.md`):
+
+| Calibre ($V_1$) | Archivos ($V_A$) | Ops ($V_B$) | VUs ($V_C$) | Workers ($V_3$) | p95 POST /jobs (ms) | p95 Total Job (s) | Umbral SLO 2 | Errores (%) | Req/s | Resultado |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
 | **1 KB** | 1 | 1 | 1 | 2 | **98 ms** | **0.27 s** | $\le 30\text{ s}$ | 0.00% | 1.55 | **CUMPLE** |
 | **1 MB** | 1 | 1 | 1 | 2 | **73 ms** | **0.22 s** | $\le 30\text{ s}$ | 0.00% | 1.73 | **CUMPLE** |
@@ -56,111 +67,109 @@ Directorio de artefactos crudos: `hit3/carga/resultados/20261107_143830/`
 | **50 MB** | 1 | 1 | 1 | 2 | **2,964 ms** | **15.74 s** | $\le 120\text{ s}$ | 0.00% | 0.85 | **NO CUMPLE** |
 | **100 MB** | 1 | 1 | 1 | 2 | **4,921 ms** | **24.50 s** | $\le 120\text{ s}$ | 0.00% | 0.83 | **NO CUMPLE** |
 
-### 2.3 Interpretación de los Resultados de V1
-1. **Cumplimiento del Procesamiento Asincrónico (SLO 2):**  
-   Para todos los tamaños ensayados (incluyendo las imágenes masivas de 50 MB y 100 MB), el tiempo total de procesamiento distribuido (`job_total_duration`) cumplió holgadamente con los límites contractuales:
-   * 10 MB completó en $2.88\text{ s}$ (límite: $\le 30\text{ s}$).
-   * 50 MB completó en $15.74\text{ s}$ (límite: $\le 120\text{ s}$).
-   * 100 MB completó en $24.50\text{ s}$ (límite: $\le 120\text{ s}$).
-   Esto confirma que la etapa de paralelización de la convolución Sobel (`split` $\to$ `workers` $\to$ `joiner`) es sumamente rápida y eficiente.
-
-2. **Degradación del Endpoint de Ingestión (SLO 1):**  
-   A partir de imágenes de 10 MB, la latencia percentil 95 del endpoint `POST /jobs` supera el límite estricto de $1,000\text{ ms}$ ($1.24\text{ s}$ para 10 MB, $2.96\text{ s}$ para 50 MB y $4.92\text{ s}$ para 100 MB). La causa no es el cómputo del filtro, sino la sobrecarga del middleware HTTP al recibir la transmisión multipart y transferir los bloques binarios crudos a Redis antes de poder liberar la respuesta `202 Accepted`.
+### 2.3 Conclusión sobre V1 (Nube vs. Local)
+* **El procesamiento distribuido (`tiempos_s.total`, SLO 2) cumple en el 100 % de los tamaños en ambos entornos:** Incluso con imágenes de **50 MB** ($13.95\text{ s}$ en nube, $15.74\text{ s}$ en local) y **100 MB** ($25.44\text{ s}$ en nube, $24.50\text{ s}$ en local), el pipeline `split` $\to$ `sobel-worker` $\to$ `joiner` termina muy por debajo del umbral de $120\text{ s}$ y con **0,00 % de errores**.
+* **Lo único que incumple es el `p95` de `POST /jobs` (SLO 1 $\le 1000\text{ ms}$):** En local se supera a partir de 10 MB ($1,244\text{ ms}$) por el tiempo de lectura multipart, validación de imagen con Pillow (`Image.open().verify()`) y escritura del binario en Redis antes de responder `202 Accepted`. En la nube se suma además el RTT de red (~$210\text{ ms}$) y el ancho de banda de subida del cliente (~$3\text{ MB/s}$), llevando el `POST` de 1 MB a $1,391\text{ ms}$ y el de 100 MB a $9,665\text{ ms}$.
 
 ---
 
-## 3. Experimento de Escalabilidad de Workers — Dimensión V3 (2, 4 y 8 Workers)
+## 3. Concurrencia en Nube y Escalabilidad de Workers — Dimensión V3 (2, 4 y 8 Workers)
 
-### 3.1 Metodología de Ensayo
-Se seleccionó la celda crítica `VA=10, VB=2, VC=10, V1=1mb` (una de las combinaciones que presentaban incumplimiento de SLO 1 en la matriz representativa) y se evaluó sucesivamente bajo 3 configuraciones de escalado horizontal:
-1. `kubectl scale deploy/sobel-worker -n sobel --replicas=2`
-2. `kubectl scale deploy/sobel-worker -n sobel --replicas=4`
-3. `kubectl scale deploy/sobel-worker -n sobel --replicas=8`
+### 3.1 Celdas con Concurrencia en la Nube (`http://8.232.111.42`)
+Artefactos en `hit3/carga/resultados/nube_matriz/` (`informe.md`):
 
-En cada caso, se aguardó la estabilización de los pods (`kubectl rollout status`), se esperó el latido de registro en Redis (`heartbeat`), y se disparó:
-```bash
-TARGET_URL=http://localhost ./correr_matriz.sh --celda 10 2 10 1mb
-```
+| VA | VB | VC | V1 | V3 | p95 POST (ms) | p95 total (s) | Errores (%) | Req/s | Resultado | Observación |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **10** | **2** | **10** | **1mb** | **2** | **4,102 ms** | **16.22 s** ($\le 120$) | **0.00%** | 7.34 | **NO CUMPLE** | 100 % de jobs completados a tiempo ($16.22\text{ s}$). No cumple únicamente por `POST /jobs` ($4.10\text{ s} > 1\text{ s}$) al recibir $10\times 10\text{ MB}$. |
+| **1** | **2** | **10** | **1mb** | **2** | **1,459 ms** | **1.25 s** ($\le 30$) | **4.11%** | 7.17 | **NO CUMPLE** | Al compartir los 10 VUs el mismo token (`sub="tomas"`), al superar 120 req/min el rate-limiter de Redis (`SOBEL_PEDIDOS_POR_MINUTO=120`) rechaza con HTTP 429 (`DEMASIADOS_PEDIDOS`). |
 
-### 3.2 Resultados Experimentales Obtenidos
-Carpetas de artefactos crudos: `resultados/20261107_144259/` ($V_3=2$), `resultados/20261107_144440/` ($V_3=4$) y `resultados/20261107_144843/` ($V_3=8$).
+### 3.2 Escalado de Workers (V3 = 2, 4 y 8) en Celda `10 2 10 1mb`
+Se ejecutó la celda `VA=10, VB=2, VC=10, V1=1mb` escalando `deploy/sobel-worker` a **2, 4 y 8 réplicas** (`resultados/20261107_144259/`, `resultados/20261107_144440/` y `resultados/20261107_144843/`):
 
-| Workers ($V_3$) | Archivos ($V_A$) | Ops ($V_B$) | VUs ($V_C$) | Calibre ($V_1$) | p95 POST /jobs (ms) | p95 Total Job (s) | Pico Cola RabbitMQ (`sobel.tareas.*`) | Memoria Pico Redis | Throughput (req/s) | SLO 1 (POST $\le 1$s) | SLO 2 (Total $\le 120$s) |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **2 workers** | 10 | 2 | 10 | 1mb | **639 ms** | **16.64 s** | **77 tareas encoladas** | **1.03 GB** | 8.65 | **CUMPLE** | **CUMPLE** |
-| **4 workers** | 10 | 2 | 10 | 1mb | **1,570 ms** | **30.23 s** | **0 tareas (inmediato)** | **1.13 GB** | 8.21 | **NO CUMPLE** | **CUMPLE** |
-| **8 workers** | 10 | 2 | 10 | 1mb | **1,078 ms** | **31.71 s** | **0 tareas (inmediato)** | **1.27 GB** | 7.19 | **NO CUMPLE** | **CUMPLE** |
+| Workers ($V_3$) | Entorno | VA | VB | VC | V1 | p95 POST /jobs (ms) | p95 Total Job (s) | Pico Cola `sobel.tareas.*` | Memoria Pico Redis | Resultado |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **2 workers** | Nube (GKE) | 10 | 2 | 10 | 1mb | **4,102 ms** | **16.22 s** ($\le 120$) | **18 mensajes** | **293 MiB** | **NO CUMPLE** (por POST) |
+| **2 workers** | Local (Kind) | 10 | 2 | 10 | 1mb | **639 ms** (1,194 ms en matriz) | **16.64 s** ($\le 120$) | **77 mensajes** | **1.03 GB** | **CUMPLE** / **NO CUMPLE** (por POST) |
+| **4 workers** | Local (Kind) | 10 | 2 | 10 | 1mb | **1,570 ms** | **30.23 s** ($\le 120$) | **0 mensajes** | **1.13 GB** | **NO CUMPLE** (por POST) |
+| **8 workers** | Local (Kind) | 10 | 2 | 10 | 1mb | **1,078 ms** | **31.71 s** ($\le 120$) | **0 mensajes** | **1.27 GB** | **NO CUMPLE** (por POST) |
 
-*Nota sobre variaciones previas:* En la corrida preliminar con 2 workers bajo contención simultánea de background jobs huérfanos, el p95 de POST alcanzó los $1,194\text{ ms}$. Al estabilizar el cluster y reiniciar los componentes en limpio, oscila en torno a $640\text{ ms} - 1,500\text{ ms}$.
-
-### 3.3 Pregunta de Cátedra: ¿Más workers mejoran el p95 del job y cambian algo en el POST?
-* **Impacto en el `POST /jobs`:** **ABSOLUTAMENTE NINGUNO.**  
-  El p95 de `POST /jobs` se mantuvo persistentemente en la franja de $0.6\text{ s} - 1.5\text{ s}$ independientemente de si había 2, 4 u 8 workers. El motivo técnico es indiscutible: el ciclo de vida del `POST /jobs` concluye en el momento en que el `backend` termina de escribir el payload en Redis y publica el evento de inicio en la cola `sobel.split`. Los workers aún no participan ni han consumido ningún mensaje. Por ende, **el escalado de workers es ortogonal e inocuo frente a la latencia de ingestión HTTP**.
-* **Impacto en las Colas de Mensajería y el Procesamiento:**  
-  * Con **2 workers**, la capacidad de consumo de convolución es menor a la tasa con la que `split` divide 10 imágenes por cada uno de los 10 usuarios concurrentes, produciendo un cuello de acumulación en RabbitMQ donde la cola `sobel.tareas.*` trepó hasta **77 tareas en espera**.
-  * Con **4 y 8 workers**, la tasa de consumo superó instantáneamente a la tasa de particionamiento, manteniendo la cola de tareas permanentemente en **0 mensajes**.
-  * Sin embargo, debido a que el hardware anfitrión cuenta con 6 núcleos físicos, la presencia de 8 workers compitiendo agresivamente por ciclos de CPU contra el backend, Redis y los 3 nodos de RabbitMQ genera contención a nivel del scheduler de Linux/Windows, manteniendo el tiempo total del job en ~30 segundos.
+### 3.3 ¿Más workers mejoran el p95 del job y cambian algo en el POST?
+1. **En el `POST /jobs` no mejora nada:** El `POST /jobs` ocurre de forma sincrónica en el `backend` antes de publicar en `sobel.split`. Agregar más workers (de 2 a 4 u 8) **no reduce la latencia del `POST /jobs`** porque los workers sólo consumen de `sobel.tareas.*` después de que el `backend` ya respondió `202 Accepted`.
+2. **En la cola `sobel.tareas.*` y el procesamiento del job:** Pasar de 2 a 4 y 8 workers elimina por completo la acumulación en la cola `sobel.tareas.*` (baja de **77 mensajes** a **0 mensajes** en espera). Sin embargo, en un nodo único de 6 núcleos físicos, aumentar a 4 y 8 workers incrementa la contención de CPU con `backend`, `split` y `redis`, haciendo que el `p95` tanto del job ($16.64\text{ s} \to 30.23\text{ s} \to 31.71\text{ s}$) como del `POST` ($639\text{ ms} \to 1,570\text{ ms}$) no mejoren por competencia de CPU local.
 
 ---
 
-## 4. Diagnóstico Detallado del Cuello de Botella del Sistema
+## 4. Diagnóstico del Cuello de Botella (Con Confirmación en Grafana)
 
-### 4.1 Identificación del Cuello de Botella: Ingestión (Backend + Redis)
-El análisis comparativo de las 8 celdas de la matriz y las extensiones V1 y V3 demuestra inequívocamente que el **único punto de saturación y quiebre de los SLOs se localiza en la capa sincrónica de ingestión**:
+### 4.1 Causa Raíz: Recepción Sincrónica de Imágenes en Backend y Escritura en Redis
+Los números de la matriz local (`resultados/20261107_112004/informe.md`) y de las corridas en la nube confirman que **lo que incumple el SLO nunca es el procesamiento distribuido, sino el `p95` del `POST /jobs`**:
+* En la matriz local:
+  * `10 × 10 × 1 MB` ($V_A=10, V_C=10$): `p95 POST` = **$1,194\text{ ms}$** ($1.2\text{ s}$), mientras que `p95 total` = $18.18\text{ s}$ ($\le 120\text{ s}$).
+  * `1 × 50 × 1 MB` ($V_A=1, V_C=50$ usuarios): `p95 POST` = **$2,418\text{ ms}$** ($2.4\text{ s}$), mientras que `p95 total` = $12.31\text{ s}$ ($\le 30\text{ s}$).
+  * `50 × 10 × 1 MB` ($V_A=50$ archivos, $V_C=10$): `p95 POST` = **$19,612\text{ ms}$** ($19.6\text{ s}$), mientras que `p95 total` = $66.37\text{ s}$ ($\le 120\text{ s}$).
+* En la nube (`http://8.232.111.42`):
+  * `10 × 10 × 1 MB` ($V_A=10, V_C=10$): `p95 POST` = **$4,102\text{ ms}$** ($4.1\text{ s}$), mientras que `p95 total` = $16.22\text{ s}$ ($\le 120\text{ s}$).
 
-$$\text{Cliente HTTP} \xrightarrow{\text{Multipart Stream}} \text{Backend (API Gateway)} \xrightarrow{\text{Buffers Binarios RAW}} \text{Redis Storage}$$
+**Cómo impacta una variable en la otra:**
+En [`hit3/backend/app.py`](../backend/app.py) y [`hit3/backend/jobs.py`](../backend/jobs.py), antes de devolver el código `202 Accepted`, el `backend` debe:
+1. Recibir todos los bytes del cuerpo `multipart/form-data` (`await archivo.read()`).
+2. Decodificar y verificar la integridad de cada imagen PNG con Pillow (`validacion.imagenes`).
+3. Ejecutar un pipeline en Redis (`jobs.crear`) que guarda cada archivo original en `job:{id}:entrada:{i}` (`SET` de cada imagen en memoria de Redis).
 
-1. **Dependencia del Volumen de Bytes antes del 202:**  
-   Para que el backend responda con `202 Accepted`, debe garantizar que el pedido es persistente e inmutable. Esto exige procesar en tiempo real la subida de los archivos:
-   * En la celda $V_A=50$ ($50\text{ MB}$ por petición) con 10 usuarios, el backend debe recibir y almacenar $500\text{ MB}$ de datos binarios antes de devolver cada HTTP 202, elevando el p95 de `POST /jobs` a **19.6 segundos**.
-   * En la celda $V_C=50$ ($50\text{ VUs}$ concurrentes), 50 conexiones simultáneas transfieren imágenes en paralelo, saturando el pool de conexiones de Redis y elevando el p95 a **2.4 segundos**.
-   * En el barrido $V_1$, el p95 escala en función lineal directa del tamaño de la imagen: $73\text{ ms}$ (1 MB) $\to 1,244\text{ ms}$ (10 MB) $\to 2,964\text{ ms}$ (50 MB) $\to 4,921\text{ ms}$ (100 MB).
+Por lo tanto, **más archivos por pedido ($V_A$), mayor tamaño por archivo ($V_1$) o más usuarios concurrentes ($V_C$) multiplican linealmente los megabytes por segundo que deben atravesar el `backend` y escribirse en `redis-0` antes de emitir el `202`**.
 
-2. **Comportamiento de la Memoria de Redis:**  
-   Durante las pruebas de alta concurrencia y tamaño, la memoria utilizada por Redis pasó de un consumo basal de $640\text{ MB}$ hasta un pico sostenido de **$1.27\text{ GB}$**, confirmando que Redis actúa como el embudo de absorción de datos crudos.
-
-3. **Comportamiento de CPU por Pod:**  
-   * **Backend:** Presenta picos intensivos de CPU durante el parseo de multipart boundary y serialización JSON.
-   * **Redis:** Presenta alta carga de I/O de memoria y red durante los volcados de imágenes.
-   * **Workers:** Presentan un consumo estrictamente CPU-bound durante la aplicación de la matriz de convolución $3\times 3$, pero no sufren contención de memoria ni afectan la respuesta inicial al cliente.
-
----
-
-## 5. Evidencia de Observabilidad en Grafana y Métricas del Clúster
-
-Se consolidaron capturas reales tomadas directamente desde el tablero de Grafana desplegado en el namespace `monitoring` (`sobel-hit4-dashboard`):
-
-### 5.1 Consumo de CPU por Pod
-![Consumo de CPU por Pod](grafana_cpu_por_pod.png)
-*Muestra la distribución de CPU entre los microservicios: picos transitorios en `backend` y `split` durante la ingestión/segmentación, y carga estable distribuida en los pods de `sobel-worker`.*
-
-### 5.2 Memoria Utilizada por Pod (Saturación de Redis)
-![Memoria Utilizada por Pod](grafana_memoria_por_pod_redis.png)
-*Confirma que el pod `redis-0` es el mayor consumidor de memoria del sistema, escalando desde 640 MB hasta superar 1.25 GB a medida que ingresan ráfagas de imágenes de 10 MB a 100 MB.*
-
-### 5.3 Profundidad de Colas en RabbitMQ
-![Profundidad de Colas en RabbitMQ](grafana_cola_rabbitmq.png)
-*Refleja la dinámica de las colas Quorum: acumulación en `sobel.tareas.*` cuando los workers son insuficientes ($V_3=2$), y vaciado inmediato a tasa cero cuando se escala a 4 y 8 workers.*
-
-### 5.4 Tablero Panorámico de Observabilidad
-![Dashboard General de Grafana](grafana_cuello_botella_dashboard.png)
-*Vista unificada de los 14 paneles en Grafana durante la ejecución sostenida de las matrices de carga.*
+### 4.2 Confirmación con las Métricas y Capturas del Grafana Público (Nube GKE)
+Durante las corridas contra `http://8.232.111.42`, el Grafana público (`http://136.80.214.178/d/chimera-sobel-hit4`) registró en el namespace `chimera-sobel`:
+* **Memoria de Redis (`redis-0`):** Subió desde una base en reposo de **$16.38\text{ MiB}$** hasta un pico de **$292.99\text{ MiB}$** al absorber las imágenes de entrada y los fragmentos intermedios.
+* **CPU por Pod (`chimera-sobel`):**
+  * Los 3 pods de `backend` (`backend-7f9f79fddb-*`) sumaron **$0.38\text{ cores}$** (con picos individuales de $0.17\text{ cores}$ y ~$118\text{ MiB}$ de RAM cada uno) procesando las subidas multipart.
+  * El pod `redis-0` alcanzó un pico de **$0.26\text{ cores}$** recibiendo las escrituras binarias.
+  * El pod `split-76459864b-mjrfs` alcanzó **$0.50\text{ cores}$** y **$263.37\text{ MiB}$** de RAM al decodificar y particionar las imágenes en bandas horizontales.
+  * Los 2 pods `sobel-worker` alcanzaron **$0.42\text{ cores}$** y **$0.34\text{ cores}$** respectivamente.
+* **Largo de la cola `sobel.tareas.*`:** En GKE con 2 workers, la cola `sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.1.0` llegó a un pico de **17–18 mensajes** durante la ráfaga de $10\times 10$ y se vació a **0** en pocos segundos, confirmando que los workers drenan el trabajo rápidamente.
 
 ---
 
-## 6. Registro de Uso de Inteligencia Artificial (Transparencia Académica)
-**Estudiante:** Salvador Baez  
-**Asignatura:** Sistemas Distribuidos y Programación Paralela (2026) — Cátedra David Petrocelli
+## 5. Capturas de Grafana
 
-En cumplimiento con los requerimientos de integridad y transparencia de la cátedra:
+### 5.1 Capturas del Clúster en la Nube (`http://136.80.214.178/d/chimera-sobel-hit4`)
 
-1. **Herramienta Empleada:**  
-   * **Google DeepMind Antigravity / Gemini:** Asistente interactivo de ingeniería y pair programming.
-2. **Tareas Asistidas:**  
-   * Automatización de scripts de despliegue y actualización de manifiestos Kustomize para la versión `1.1.0`.
-   * Refinamiento de scripts de pruebas k6 en JavaScript (`matriz_r5.js`) para cálculo de percentiles y manejo de desconexión controlada.
-   * Diagnóstico de cuotas de recursos en Kubernetes (ajuste de memory requests en workers para permitir scheduling de 8 réplicas en clúster local).
-   * Generación de comandos para captura automatizada de paneles de Grafana vía Chrome Headless.
-3. **Supervisión Humana y Validación:**  
-   * La totalidad de las métricas presentadas provienen de ejecuciones reales en tiempo real sobre el clúster local de desarrollo (cero datos inventados o simulados).
-   * La interpretación técnica del cuello de botella y la correlación entre capas de software corresponden al análisis empírico realizado por el equipo Cerberus.
+#### Dashboard General (Nube GKE — Namespace `chimera-sobel`)
+![Dashboard General Nube](grafana_nube_dashboard_general.png)
+
+#### CPU Utilizada por Pod (Nube GKE)
+![CPU por Pod Nube](grafana_nube_cpu_pods.png)
+
+#### Memoria Utilizada por Pod — Pico en `redis-0` y `split` (Nube GKE)
+![Memoria por Pod Nube](grafana_nube_memoria_redis_pods.png)
+
+#### Largo de la Cola `sobel.tareas.*` en RabbitMQ (Nube GKE)
+![Colas RabbitMQ Nube](grafana_nube_colas_rabbitmq.png)
+
+---
+
+### 5.2 Capturas del Clúster Local (`kind-sobel-cluster` — Pruebas de Escalado V3 = 2, 4 y 8 Workers)
+
+#### Dashboard General (Local)
+![Dashboard General Local](grafana_dashboard_general.png)
+
+#### CPU Utilizada por Pod (Local)
+![CPU por Pod Local](grafana_cpu_pods.png)
+
+#### Memoria Utilizada por Pod — `redis-0` hasta 1.27 GB (Local)
+![Memoria por Pod Local](grafana_memoria_redis_pods.png)
+
+#### Largo de la Cola `sobel.tareas.*` — 77 mensajes con 2 workers vs. 0 con 4 y 8 workers (Local)
+![Colas RabbitMQ Local](grafana_colas_rabbitmq.png)
+
+---
+
+## 6. Parte de Uso de IA para el Informe
+**Integrante:** Salvador Baez (`Salva`)
+
+Durante el desarrollo y ejecución de las pruebas de carga (Requerimiento R5 del Hit #3) y el análisis de observabilidad (Hit #4), se utilizó el asistente de programación **Google Antigravity (Gemini)** como herramienta de apoyo bajo supervisión directa:
+
+1. **Automatización y corrección del runner de carga (`correr_matriz.sh`):** Normalización de `TARGET_URL` para evitar barras dobles (`//jobs` $\to$ HTTP 404), soporte de variable de entorno `V3` cuando se apunta a un clúster remoto y generación automatizada de tablas Markdown (`informe.md`) a partir de los resúmenes JSON exportados por k6.
+2. **Despliegue y ajuste de recursos en Kubernetes (`hit3/k8s/`):** Actualización del clúster local a la versión `1.1.0`, diagnóstico de insuficiencia de memoria (`Insufficient memory`) al escalar `sobel-worker` a 8 réplicas en un nodo de 7.6 GiB y ajuste del `resources.requests.memory` a `128Mi`.
+3. **Recolección de evidencia y métricas en Grafana/Prometheus:** Consultas PromQL contra las instancias de Prometheus (local y GKE) para extraer los valores exactos de picos de CPU por pod, memoria working-set de `redis-0` y profundidad de colas `sobel.tareas.*`, junto con la automatización de capturas de pantalla mediante Chrome Headless.
+4. **Validación experimental:** Todas las corridas de k6 (`--smoke`, `--v1`, `--celda` con 2, 4 y 8 workers, y `--matriz`) fueron ejecutadas de forma real contra el clúster local (`http://localhost`) y el clúster público en GKE (`http://8.232.111.42/`), verificando empíricamente cada métrica reportada.
