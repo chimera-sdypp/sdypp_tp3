@@ -180,7 +180,8 @@ def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms,
         
         # Contar cuántas operaciones necesitan halo de borde (1 fila extra arriba y abajo por cada filtro 3x3)
         filas_de_borde = sum(paso["operacion"] in OPERACIONES_DE_VECINDAD for paso in operaciones)
-        nombre_cola = f"{colas.PREFIJO_TAREAS}{operaciones[0]['imagen']}"
+        # Se declara antes de medirla: si no existiera, el queue_declare pasivo de calcular_partes cerraría el canal.
+        cola = colas.declarar_tareas(canal, operaciones[0]["imagen"])
         
         tareas = []
         archivos = int(redis.hget(clave_job, "archivos"))
@@ -200,7 +201,7 @@ def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms,
                 return
 
             # 4. Calcular cantidad de partes de forma adaptativa
-            n_partes = calcular_partes(matriz, redis, archivos=archivos, canal=canal, cola_tareas=nombre_cola,
+            n_partes = calcular_partes(matriz, redis, archivos=archivos, canal=canal, cola_tareas=cola,
                                        partes_fijas=partes)
                                        
             # 5. Cortar la matriz en franjas horizontales con sus filas de halo añadidas
@@ -229,7 +230,6 @@ def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms,
         redis.hset(clave_job, "fragmentos_total", len(tareas))
         
         # 9. Declarar la cola de tareas en RabbitMQ y publicar un mensaje por cada fragmento
-        cola = colas.declarar_tareas(canal, operaciones[0]["imagen"])
         for tarea in tareas:
             colas.publicar(canal, cola, {**tarea, "encolado": ahora_ms()})
             
