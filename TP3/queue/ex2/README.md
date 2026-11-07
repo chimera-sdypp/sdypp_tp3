@@ -1,5 +1,7 @@
 # Hit #0 — Ejemplo 2: Event Bus / Pub-Sub (Fan-out)
 
+Video: [hit0-ex2-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/hit0-ex2-demo.mp4).
+
 Este módulo implementa el patrón **Publicador/Suscriptor (Pub-Sub)** mediante un **Exchange de tipo Fan-out** en **RabbitMQ** (protocolo AMQP 0-9-1) utilizando Python (`pika`).
 
 ---

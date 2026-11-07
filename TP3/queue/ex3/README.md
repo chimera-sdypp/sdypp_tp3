@@ -1,5 +1,7 @@
 # Hit #0 — Ejemplo 3: Dead Letter Queue (DLQ)
 
+Video: [hit0-ex3-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/hit0-ex3-demo.mp4).
+
 Este módulo implementa el patrón **Dead Letter Queue** utilizando un **Dead Letter Exchange (DLX)** de **RabbitMQ** (protocolo AMQP 0-9-1) y Python (`pika`).
 
 ---

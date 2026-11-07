@@ -1,5 +1,7 @@
 # Hit #2 — Sobel con offloading a la nube
 
+Video: [tp3-hit2-demo.mp4](https://github.com/chimera-sdypp/sdypp_tp3/releases/download/v1.1.0/tp3-hit2-demo.mp4).
+
 ```bash
 ./construir.sh && docker save sobel-hit2:local | sudo k3s ctr images import -   # la imagen del master
 k8s/desplegar.sh                                   # RabbitMQ, Redis, el master y 2 workers locales, en k3s
