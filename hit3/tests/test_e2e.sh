@@ -45,7 +45,7 @@ URL="${SOBEL_URL:-http://localhost}"
 NAMESPACE="${SOBEL_NAMESPACE:-sobel}"
 
 # Imagen OCI autorizada del worker para el procesamiento de filtros (Sección 4 del Contrato)
-IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.1.1}"
+IMAGEN="${SOBEL_IMAGEN:-ghcr.io/chimera-sdypp/sobel-worker:1.1.2}"
 
 # Tiempo máximo en segundos para esperar la finalización del trabajo antes de timeout
 TIMEOUT_S="${SOBEL_TIMEOUT:-180}"

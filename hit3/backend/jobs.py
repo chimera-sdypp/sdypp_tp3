@@ -7,6 +7,8 @@ import uuid
 from collections import Counter
 from datetime import UTC, datetime
 
+from comun import almacen as punteros
+
 ESTADOS = ("queued", "processing", "done", "failed", "dlq")
 TERMINADOS_MAX = 1000
 
@@ -15,10 +17,15 @@ def ahora_ms():
     return int(time.time() * 1000)
 
 
-def crear(redis, ttl, usuario, operaciones, contenidos):
-    """Guarda el job y sus archivos. Devuelve (job_id, creado_ms)."""
+def crear(redis, almacen, ttl, usuario, operaciones, contenidos):
+    """Sube los archivos al bucket y guarda el job con un puntero a cada uno. Devuelve (job_id, creado_ms).
+
+    Los archivos van primero: si el bucket no responde (NoDisponible), el job no llega a existir.
+    """
     job_id, creado = str(uuid.uuid4()), ahora_ms()
     clave = f"job:{job_id}"
+    punteros.escribir_varios(redis, almacen, [(f"{clave}:entrada:{a}", datos) for a, datos in enumerate(contenidos)],
+                             ttl)
     tuberia = redis.pipeline()
     tuberia.hset(clave, mapping={
         "usuario": usuario, "estado": "queued", "creado": creado, "operaciones": json.dumps(operaciones),
@@ -26,8 +33,6 @@ def crear(redis, ttl, usuario, operaciones, contenidos):
         "cola_ms": 0, "cola_n": 0, "proc_ms": 0, "proc_n": 0,
     })
     tuberia.expire(clave, ttl)
-    for archivo, datos in enumerate(contenidos):
-        tuberia.set(f"{clave}:entrada:{archivo}", datos, ex=ttl)
     for indice in ("jobs", f"jobs:{usuario}"):
         tuberia.zadd(indice, {job_id: creado})
         tuberia.expire(indice, ttl)
@@ -35,11 +40,11 @@ def crear(redis, ttl, usuario, operaciones, contenidos):
     return job_id, creado
 
 
-def borrar(redis, job_id, usuario, archivos):
+def borrar(redis, almacen, job_id, usuario, archivos):
     """Deshace `crear` si no se pudo encolar."""
-    claves = [f"job:{job_id}"] + [f"job:{job_id}:entrada:{a}" for a in range(archivos)]
+    punteros.borrar(redis, almacen, *[f"job:{job_id}:entrada:{a}" for a in range(archivos)])
     tuberia = redis.pipeline()
-    tuberia.delete(*claves)
+    tuberia.delete(f"job:{job_id}")
     tuberia.zrem("jobs", job_id)
     tuberia.zrem(f"jobs:{usuario}", job_id)
     tuberia.execute()

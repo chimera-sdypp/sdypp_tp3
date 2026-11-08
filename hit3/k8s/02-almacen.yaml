@@ -1,0 +1,99 @@
+# Dónde van los píxeles (contrato §10): Redis guarda el estado de cada job y un puntero por imagen; los bytes van a
+# un bucket. En GKE es un bucket de Cloud Storage (k8s-gke/ reemplaza este ConfigMap y no despliega el emulador);
+# en el k3s local, el emulador de la API de GCS (fake-gcs-server) con su propio disco.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sobel-almacen
+  namespace: sobel
+data:
+  SOBEL_ALMACEN_BUCKET: sobel-imagenes
+  SOBEL_ALMACEN_URL: http://almacen:4443
+---
+# Los pods que leen o escriben píxeles usan esta cuenta. En GKE es la identidad con la que entran al bucket por
+# Workload Identity, sin claves (el permiso lo da hit3/k8s-gke/README.md); en el k3s no hace nada.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sobel-almacen
+  namespace: sobel
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: almacen
+  namespace: sobel
+  labels:
+    app.kubernetes.io/name: almacen
+    app.kubernetes.io/component: object-storage
+    sobel/infra: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: almacen
+  ports:
+    - name: http
+      port: 4443
+      targetPort: 4443
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: almacen
+  namespace: sobel
+  labels:
+    app.kubernetes.io/name: almacen
+    app.kubernetes.io/component: object-storage
+    sobel/infra: "true"
+spec:
+  serviceName: almacen
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: almacen
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: almacen
+        app.kubernetes.io/component: object-storage
+        sobel/infra: "true"
+    spec:
+      nodeSelector:
+        sobel/infra: "true"
+      tolerations:
+        - key: "sobel/infra"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      containers:
+        - name: almacen
+          image: fsouza/fake-gcs-server:1.56.1
+          imagePullPolicy: IfNotPresent
+          args: ["-scheme", "http", "-port", "4443", "-backend", "filesystem", "-filesystem-root", "/storage",
+                 "-public-host", "almacen:4443"]
+          ports:
+            - name: http
+              containerPort: 4443
+          volumeMounts:
+            - name: almacen-data
+              mountPath: /storage
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            tcpSocket:
+              port: 4443
+            initialDelaySeconds: 2
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: almacen-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

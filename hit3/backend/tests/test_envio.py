@@ -3,10 +3,11 @@ import json
 import pytest
 
 from backend import validacion
+from comun import almacen
 from conftest import IMAGEN, OTRA, enviar, pasos, png, ruido, token
 
 
-def test_job_valido_se_guarda_y_se_encola(cliente, redis, rabbit, worker):
+def test_job_valido_se_guarda_y_se_encola(cliente, redis, rabbit, bucket, worker):
     respuesta = enviar(cliente, [png(), png(4, 4)], pasos("grises", "sobel"))
     assert respuesta.status_code == 202
     contenido = respuesta.json()["contenido"]
@@ -17,7 +18,9 @@ def test_job_valido_se_guarda_y_se_encola(cliente, redis, rabbit, worker):
     job = redis.hgetall(f"job:{job_id}")
     assert job[b"usuario"] == b"ana" and job[b"estado"] == b"queued"
     assert json.loads(job[b"operaciones"])[1] == {"operacion": "sobel", "imagen": IMAGEN}
-    assert redis.get(f"job:{job_id}:entrada:1") == png(4, 4)
+    # Redis guarda el puntero; los bytes están en el bucket (contrato §10).
+    assert redis.get(f"job:{job_id}:entrada:1") == f"job/{job_id}/entrada/1.png".encode()
+    assert almacen.leer(redis, bucket, f"job:{job_id}:entrada:1") == png(4, 4)
     assert 0 < redis.ttl(f"job:{job_id}") <= 86400
 
 
@@ -129,8 +132,17 @@ def test_un_invalido_no_llega_a_rabbitmq(cliente, rabbit, worker):
     assert rabbit.colas == {}
 
 
-def test_rabbitmq_caido_es_503_y_no_deja_el_job(cliente, redis, rabbit, worker):
+def test_rabbitmq_caido_es_503_y_no_deja_el_job(cliente, redis, rabbit, bucket, worker):
     rabbit.caido = True
     respuesta = enviar(cliente)
     assert respuesta.status_code == 503 and tipo(respuesta) == "SERVICIO_NO_DISPONIBLE"
     assert redis.keys("job:*") == [] and redis.zcard("jobs") == 0
+    assert bucket.objetos == {}  # tampoco quedan las imágenes en el bucket
+
+
+def test_bucket_caido_es_503_y_no_deja_el_job(cliente, redis, rabbit, bucket, worker):
+    bucket.caido = True
+    respuesta = enviar(cliente)
+    assert respuesta.status_code == 503 and tipo(respuesta) == "SERVICIO_NO_DISPONIBLE"
+    assert respuesta.headers["retry-after"] == "5"
+    assert redis.keys("job:*") == [] and redis.zcard("jobs") == 0 and rabbit.colas == {}

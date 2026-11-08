@@ -6,6 +6,7 @@ namespace: sobel
 resources:
   - 00-namespace.yaml
   - 01-rabbitmq.yaml
+  - 02-almacen.yaml
   - 02-redis.yaml
   - 03-backend.yaml
   - 04-split.yaml

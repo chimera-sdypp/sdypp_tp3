@@ -3,6 +3,7 @@ import pytest
 
 from backend import auth
 from backend.config import Config
+from comun.almacen import AlmacenMemoria
 from conftest import SECRETO, token
 
 
@@ -46,7 +47,7 @@ def test_limite_por_minuto_es_429(config, redis, rabbit, tmp_path, monkeypatch):
     from backend.app import crear_app
     monkeypatch.setenv("SOBEL_LOGS", str(tmp_path))
     limitada = Config(secreto=SECRETO, imagenes_permitidas=config.imagenes_permitidas, pedidos_por_minuto=2)
-    cliente = TestClient(crear_app(limitada, redis, rabbit, mantener=False))
+    cliente = TestClient(crear_app(limitada, redis, rabbit, mantener=False, almacen=AlmacenMemoria()))
     codigos = [cliente.get("/jobs", headers=token()).status_code for _ in range(3)]
     assert codigos == [200, 200, 429]
     respuesta = cliente.get("/jobs", headers=token())

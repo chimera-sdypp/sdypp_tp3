@@ -10,6 +10,7 @@ import sys       # Para operaciones del intérprete, como sys.exit para apagado 
 import time      # Para medir marcas de tiempo (timestamps) y calcular demoras en milisegundos
 
 # Módulos comunes del proyecto (carpeta hit3/comun/)
+from comun import almacen as punteros
 from comun import claves, colas, conexion, metricas, pixeles, registro, salud
 
 
@@ -28,7 +29,7 @@ def ahora_en_ms():
 
 
 def claves_de_entrada(job_id, archivos):
-    """Devuelve la lista de nombres de claves en Redis donde el backend guardó las imágenes originales.
+    """Devuelve la lista de claves de Redis con el puntero a cada imagen original (que el backend subió al bucket).
     Ejemplo para 2 archivos: ['job:j1:entrada:0', 'job:j1:entrada:1']
     """
     return [claves.entrada(job_id, archivo) for archivo in range(archivos)]
@@ -37,14 +38,14 @@ def claves_de_entrada(job_id, archivos):
 # -------------------------------------------------------------------------------------------------
 # 3. MANEJO DE ARCHIVOS INVÁLIDOS Y CAMBIOS DE ESTADO
 # -------------------------------------------------------------------------------------------------
-def fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora):
+def fallar_por_archivo_invalido(redis, almacen, job_id, archivos, mensaje, ahora):
     """Maneja el caso donde el usuario subió un archivo que no es una imagen válida (ej: texto plano o corrupto).
     
     ¿Qué hace?:
     1. Marca el estado del job como 'failed' y guarda el mensaje de error en Redis.
     2. Registra el trabajo en la lista global de 'terminados' para las métricas y el endpoint /stats.
-    3. Borra las imágenes originales de Redis para no desperdiciar memoria RAM.
-    4. Todo se ejecuta en un 'pipeline' (transacción atómica) para garantizar consistencia.
+    3. Borra las imágenes originales del bucket (y sus punteros de Redis): nadie las va a procesar.
+    Los pasos 1 y 2 van en un 'pipeline' (transacción atómica) para garantizar consistencia.
     """
     clave_job = claves.job(job_id)
     error = {"tipo": "ARCHIVO_INVALIDO", "mensaje": mensaje}
@@ -53,8 +54,8 @@ def fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora):
         transaccion.hset(clave_job, mapping={"estado": "failed", "error": json.dumps(error), "terminado": ahora})
         transaccion.lpush(claves.TERMINADOS, f"failed {total_ms}")
         transaccion.ltrim(claves.TERMINADOS, 0, 999)  # Mantiene solo los últimos 1000 trabajos
-        transaccion.delete(*claves_de_entrada(job_id, archivos))
         transaccion.execute()
+    punteros.borrar(redis, almacen, *claves_de_entrada(job_id, archivos))
 
 
 def pasar_a_processing(redis, job_id, t_split_ms):
@@ -148,7 +149,8 @@ def calcular_partes(matriz, redis, archivos=1, canal=None, cola_tareas=None, par
 # -------------------------------------------------------------------------------------------------
 # 5. MANEJADOR Y CONSUMO DE MENSAJES DE RABBITMQ
 # -------------------------------------------------------------------------------------------------
-def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split")):
+def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.split"),
+              *, almacen):
     """Crea la función callback que se ejecutará cada vez que llegue un mensaje a la cola 'sobel.split'."""
 
     def procesar(canal, cuerpo):
@@ -189,12 +191,12 @@ def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms,
         # 3. Procesar cada imagen del pedido
         for archivo in range(archivos):
             try:
-                # Descargar los bytes de Redis y decodificarlos en matriz NumPy RGB
-                matriz = pixeles.leer_rgb(redis.get(claves.entrada(job_id, archivo)))
+                # Seguir el puntero de Redis, bajar los bytes del bucket y decodificarlos en matriz NumPy RGB
+                matriz = pixeles.leer_rgb(punteros.leer(redis, almacen, claves.entrada(job_id, archivo)))
             except ValueError:
                 # Si el archivo está corrupto, marcamos el job como failed y salimos
                 mensaje = f"el archivo {archivo} no se pudo decodificar"
-                fallar_por_archivo_invalido(redis, job_id, archivos, mensaje, ahora_ms())
+                fallar_por_archivo_invalido(redis, almacen, job_id, archivos, mensaje, ahora_ms())
                 log.warning("job %s: %s, queda en failed", job_id, mensaje)
                 metricas.fallo("split", "split")
                 metricas.ERRORES.labels("split", "ARCHIVO_INVALIDO").inc()
@@ -207,9 +209,10 @@ def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms,
             # 5. Cortar la matriz en franjas horizontales con sus filas de halo añadidas
             fragmentos = pixeles.dividir(matriz, n_partes, filas_de_borde)
             
-            # 6. Guardar cada franja en Redis como PNG con vencimiento (TTL)
-            for f, (franja, _, _) in enumerate(fragmentos):
-                redis.set(claves.fragmento(job_id, archivo, f, 0), pixeles.a_png(franja), ex=ttl)
+            # 6. Subir cada franja al bucket como PNG (en paralelo) y dejar su puntero en Redis con vencimiento (TTL)
+            punteros.escribir_varios(redis, almacen, [(claves.fragmento(job_id, archivo, f, 0), pixeles.a_png(franja))
+                                                      for f, (franja, _, _) in enumerate(fragmentos)], ttl)
+            for f in range(len(fragmentos)):
                 tareas.append({
                     "job_id": job_id,
                     "archivo": archivo,
@@ -236,8 +239,8 @@ def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms,
         t_split_ms = ahora_ms() - inicio
         pasar_a_processing(redis, job_id, t_split_ms)
         
-        # 10. Borrar las imágenes originales de Redis: ya no hacen falta porque están fragmentadas
-        redis.delete(*claves_de_entrada(job_id, archivos))
+        # 10. Borrar las imágenes originales (bucket y punteros): ya no hacen falta porque están fragmentadas
+        punteros.borrar(redis, almacen, *claves_de_entrada(job_id, archivos))
         log.info("job %s: %d fragmentos a %s en %d ms", job_id, len(tareas), cola, t_split_ms)
         metricas.trabajo("split", "split", t_split_ms / 1000)
 
@@ -265,6 +268,7 @@ def main():
     puerto = conexion.entero_de_entorno("SOBEL_PUERTO", 8080, 1)
 
     redis = conexion.cliente_redis()
+    almacen = punteros.desde_entorno()
 
     # Iniciar servidor HTTP en segundo plano para endpoints de salud (/health) y métricas (/metrics)
     salud.servir("split", puerto, conexion.estado, redis=redis)
@@ -272,6 +276,7 @@ def main():
 
     # Conectar a Redis con reintentos y retroceso exponencial (backoff)
     conexion.con_backoff(redis.ping, "redis", log=log)
+    conexion.con_backoff(almacen.asegurar_bucket, "almacen", log=log)
 
     if partes > 0:
         log.info("split consumiendo %s, %d partes fijas por archivo", colas.SPLIT, partes)
@@ -279,7 +284,7 @@ def main():
         log.info("split consumiendo %s, partes calculadas dinámicamente", colas.SPLIT)
 
     # Bucle principal de consumo de mensajes de la cola 'sobel.split' de RabbitMQ
-    conexion.consumir(colas.SPLIT, manejador(redis, partes, ttl, log=log), al_conectar=colas.declarar,
+    conexion.consumir(colas.SPLIT, manejador(redis, partes, ttl, log=log, almacen=almacen), al_conectar=colas.declarar,
                       cliente_redis=redis, servicio="split", log=log)
 
 

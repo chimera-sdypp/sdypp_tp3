@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from backend.auth import LARGO_MINIMO_SECRETO
 
 # Los arma el propio backend en su /health: un servicio con estos nombres los pisaría (y "backend" se consultaría a sí mismo).
-PROPIOS = {"backend", "redis", "rabbitmq", "workers"}
+PROPIOS = {"backend", "redis", "rabbitmq", "almacen", "workers"}
 
 
 @dataclass(frozen=True)
