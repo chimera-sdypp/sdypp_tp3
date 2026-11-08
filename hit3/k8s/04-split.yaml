@@ -73,6 +73,9 @@ spec:
         - name: split
           image: ghcr.io/chimera-sdypp/sobel-split:1.1.2
           imagePullPolicy: IfNotPresent # Solo descarga la imagen si no está en la caché del nodo
+          envFrom:
+            - configMapRef:
+                name: sobel-almacen  # SOBEL_ALMACEN_BUCKET y, en el k3s, SOBEL_ALMACEN_URL
           ports:
             - name: http
               containerPort: 8080       # Puerto donde escucha el servidor web (/health y /metrics)

@@ -13,6 +13,7 @@
 #     '{"rule":[{"action":{"type":"Delete"},"condition":{"age":1}}]}')
 #   gcloud storage buckets add-iam-policy-binding gs://chimera-sobel-imagenes --role=roles/storage.objectUser \
 #     --member=principal://iam.googleapis.com/projects/914104353770/locations/global/workloadIdentityPools/tp3distribuidos.svc.id.goog/subject/ns/chimera-sobel/sa/sobel-almacen
+#   (y lo mismo con --role=roles/storage.legacyBucketReader: el /health del backend lee los metadatos del bucket)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: chimera-sobel
