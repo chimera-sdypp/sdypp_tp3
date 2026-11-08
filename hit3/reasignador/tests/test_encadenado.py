@@ -10,6 +10,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from comun import almacen
+from comun.almacen import AlmacenMemoria
 from joiner import joiner
 from reasignador import reasignador
 from split import split
@@ -32,7 +34,10 @@ def leer(datos):
 
 @pytest.fixture
 def redis():
-    return fakeredis.FakeRedis()
+    # Los píxeles van al bucket y Redis guarda el puntero (contrato §10): el bucket de prueba viaja con el Redis.
+    cliente = fakeredis.FakeRedis()
+    cliente.almacen = AlmacenMemoria()
+    return cliente
 
 
 class Broker:
@@ -73,13 +78,13 @@ def cargar_job(redis, archivos, operaciones):
         "usuario": "ana", "estado": "queued", "creado": CREADO, "operaciones": json.dumps(operaciones),
         "archivos": len(archivos), "fragmentos_total": 0, "completos": 0, "en_dlq": 0, "reintentos": 0})
     for a, datos in enumerate(archivos):
-        redis.set(f"job:j1:entrada:{a}", datos)
+        almacen.escribir(redis, redis.almacen, f"job:j1:entrada:{a}", datos, 86400)
 
 
 def procesar_job(redis, trabajador):
     broker = Broker()
-    split.manejador(redis, partes=3)(broker, json.dumps({"job_id": "j1"}).encode())
-    broker.correr(trabajador, joiner.manejador(redis), reasignador.manejador(redis, reintentos_max=3))
+    split.manejador(redis, almacen=redis.almacen, partes=3)(broker, json.dumps({"job_id": "j1"}).encode())
+    broker.correr(trabajador, joiner.manejador(redis, almacen=redis.almacen), reasignador.manejador(redis, reintentos_max=3))
     return broker
 
 
@@ -118,21 +123,21 @@ def test_si_un_worker_falla_con_una_tarea_se_reasigna_y_el_job_termina_igual(red
     originales = [generador.integers(0, 256, (alto, 7, 3), dtype=np.uint8) for alto in (11, 5)]
     cargar_job(redis, [png(o) for o in originales], OPERACIONES_DEL_JOB)
     # Falla el paso de sobel (el segundo) del fragmento del medio del primer archivo.
-    trabajador = falla_la_primera_vez(worker.manejador(redis, nombre="w1"), archivo=0, fragmento=1, paso=1)
+    trabajador = falla_la_primera_vez(worker.manejador(redis, almacen=redis.almacen, nombre="w1"), archivo=0, fragmento=1, paso=1)
 
     procesar_job(redis, trabajador)
 
     assert redis.hmget("job:j1", "estado", "reintentos", "en_dlq") == [b"done", b"1", b"0"]
     assert redis.hget("job:j1", "completos") == redis.hget("job:j1", "fragmentos_total") == b"6"
     for archivo, original in enumerate(originales):
-        np.testing.assert_array_equal(leer(redis.get(f"job:j1:resultado:{archivo}")),
+        np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, f"job:j1:resultado:{archivo}")),
                                       aplicar_entera(original, OPERACIONES_DEL_JOB))
 
 
 def test_si_ningun_worker_ofrece_la_operacion_las_tareas_se_agotan_y_el_job_queda_en_dlq(redis):
     original = np.random.default_rng(12).integers(0, 256, (6, 7, 3), dtype=np.uint8)
     cargar_job(redis, [png(original)], OPERACIONES_DEL_JOB)
-    trabajador = worker.manejador(redis, nombre="w1", ofrecidas=("grises",))  # no ofrece sobel
+    trabajador = worker.manejador(redis, almacen=redis.almacen, nombre="w1", ofrecidas=("grises",))  # no ofrece sobel
 
     broker = procesar_job(redis, trabajador)
 

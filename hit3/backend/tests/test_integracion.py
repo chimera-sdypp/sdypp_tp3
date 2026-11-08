@@ -10,6 +10,7 @@ import redis as redis_py
 from fastapi.testclient import TestClient
 
 from backend.app import crear_app
+from comun.almacen import AlmacenMemoria
 from backend.rabbit import Rabbit
 from comun import colas
 from conftest import IMAGEN, enviar, pasos, png, token
@@ -47,7 +48,7 @@ def sacar(canal, cola):
 def test_post_encola_en_sobel_split(canal, redis, config, tmp_path, monkeypatch):
     monkeypatch.setenv("SOBEL_LOGS", str(tmp_path))
     redis.hset("worker:w1", mapping={"imagen": IMAGEN, "operaciones": "sobel"})
-    cliente = TestClient(crear_app(config, redis, Rabbit(URL_RABBIT), mantener=False))
+    cliente = TestClient(crear_app(config, redis, Rabbit(URL_RABBIT), mantener=False, almacen=AlmacenMemoria()))
     respuesta = enviar(cliente, [png()], pasos("sobel"))
     assert respuesta.status_code == 202
     assert sacar(canal, colas.SPLIT) == {"job_id": respuesta.json()["contenido"]["job_id"]}

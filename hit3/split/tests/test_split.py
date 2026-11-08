@@ -9,6 +9,8 @@ import pytest
 from PIL import Image
 from prometheus_client import REGISTRY
 
+from comun import almacen
+from comun.almacen import AlmacenMemoria
 from split import split
 
 IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
@@ -43,7 +45,14 @@ def imagen_rgb(alto, ancho, semilla=0):
 
 @pytest.fixture
 def redis():
-    return fakeredis.FakeRedis()
+    # Los píxeles van al bucket y Redis guarda el puntero (contrato §10): el bucket de prueba viaja con el Redis.
+    cliente = fakeredis.FakeRedis()
+    cliente.almacen = AlmacenMemoria()
+    return cliente
+
+
+def entradas_en_el_bucket(redis, job_id):
+    return [nombre for nombre in redis.almacen.objetos if nombre.startswith(f"job/{job_id}/entrada/")]
 
 
 def cargar_job(redis, job_id, archivos, operaciones=cadena("grises")):
@@ -53,19 +62,19 @@ def cargar_job(redis, job_id, archivos, operaciones=cadena("grises")):
         "operaciones": json.dumps(operaciones), "archivos": len(archivos),
     })
     for a, datos in enumerate(archivos):
-        redis.set(f"job:{job_id}:entrada:{a}", datos)
+        almacen.escribir(redis, redis.almacen, f"job:{job_id}:entrada:{a}", datos, 86400)
 
 
 def test_un_job_en_cola_pasa_a_processing(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(8, 5))])
 
-    split.manejador(redis, partes=4)(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=4)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "estado") == b"processing"
 
 
 def leer_fragmento(redis, job_id, archivo, fragmento):
-    return np.asarray(Image.open(io.BytesIO(redis.get(f"job:{job_id}:frag:{archivo}:{fragmento}:0"))))
+    return np.asarray(Image.open(io.BytesIO(almacen.leer(redis, redis.almacen, f"job:{job_id}:frag:{archivo}:{fragmento}:0"))))
 
 
 def reconstruir(redis, job_id, archivo):
@@ -82,7 +91,7 @@ def test_los_fragmentos_y_la_geometria_reconstruyen_el_archivo(redis):
     original = imagen_rgb(10, 7)
     cargar_job(redis, "j1", [png(original)])
 
-    split.manejador(redis, partes=4)(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=4)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1:geometria:0", "total") == b"4"
     np.testing.assert_array_equal(reconstruir(redis, "j1", 0), original)
@@ -92,7 +101,7 @@ def test_declara_la_cola_de_la_imagen_del_primer_paso_y_publica_una_tarea_por_fr
     cargar_job(redis, "j1", [png(imagen_rgb(9, 4))])
     canal = CanalQuePublica()
 
-    split.manejador(redis, partes=3, ahora_ms=lambda: 1761055391204)(canal, b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=3, ahora_ms=lambda: 1761055391204)(canal, b'{"job_id": "j1"}')
 
     cola = "sobel.tareas.ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
     assert canal.eventos == [("declarar", cola)] + [
@@ -106,7 +115,7 @@ def test_un_png_con_alfa_se_reparte_en_rgb_sin_el_canal_alfa(redis):
     con_alfa = np.random.default_rng(1).integers(0, 256, (6, 5, 4), dtype=np.uint8)
     cargar_job(redis, "j1", [png(con_alfa, "RGBA")])
 
-    split.manejador(redis, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     np.testing.assert_array_equal(reconstruir(redis, "j1", 0), con_alfa[:, :, :3])
 
@@ -123,7 +132,7 @@ def test_cada_fragmento_lleva_una_fila_de_borde_por_operacion_de_vecindad(redis,
     original = imagen_rgb(10, 6)
     cargar_job(redis, "j1", [png(original)], operaciones)
 
-    split.manejador(redis, partes=4)(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=4)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     guardada = {k.decode(): v.decode() for k, v in redis.hgetall("job:j1:geometria:0").items()}
     assert guardada == {"total": "4", **geometria}
@@ -136,7 +145,7 @@ def test_una_imagen_con_menos_filas_que_partes_da_un_fragmento_por_fila(redis):
     cargar_job(redis, "j1", [png(original)], cadena("sobel"))
     canal = CanalQuePublica()
 
-    split.manejador(redis, partes=4)(canal, b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=4)(canal, b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1:geometria:0", "total") == b"2"
     assert sum(evento[0] == "publicar" for evento in canal.eventos) == 2
@@ -148,7 +157,7 @@ def test_un_job_de_varios_archivos_reparte_todos(redis):
     cargar_job(redis, "j1", [png(o) for o in originales])
     canal = CanalQuePublica()
 
-    split.manejador(redis, partes=3)(canal, b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=3)(canal, b'{"job_id": "j1"}')
 
     for archivo, original in enumerate(originales):
         np.testing.assert_array_equal(reconstruir(redis, "j1", archivo), original)
@@ -165,7 +174,7 @@ def reloj(*instantes):
 def test_registra_el_total_de_fragmentos_del_job_y_lo_que_tardo_el_split(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(9, 4)), png(imagen_rgb(2, 4))])
 
-    split.manejador(redis, partes=3, ahora_ms=reloj(1000, 1250))(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=3, ahora_ms=reloj(1000, 1250))(CanalQuePublica(), b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "fragmentos_total") == b"5"  # 3 del primero, 2 del segundo (tiene 2 filas)
     assert redis.hget("job:j1", "t_split_ms") == b"250"
@@ -177,7 +186,7 @@ def test_un_archivo_que_no_se_decodifica_deja_el_job_en_failed_sin_publicar_nada
     cargar_job(redis, "j1", [png(imagen_rgb(6, 4)), invalido])  # creado: 1761055391000
     canal = CanalQuePublica()
 
-    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(canal, b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2, ahora_ms=reloj(1761055392500))(canal, b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "estado") == b"failed"
     assert json.loads(redis.hget("job:j1", "error")) == {
@@ -191,7 +200,7 @@ def test_terminados_guarda_solo_los_ultimos_1000(redis):
     redis.rpush("terminados", *[f"done {i}" for i in range(1000)])
     cargar_job(redis, "j1", [b"no soy una imagen"])
 
-    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2, ahora_ms=reloj(1761055392500))(CanalQuePublica(), b'{"job_id": "j1"}')
 
     assert redis.llen("terminados") == 1000
     assert redis.lindex("terminados", 0) == b"failed 1500"
@@ -204,7 +213,7 @@ def test_un_archivo_que_pasa_el_doble_del_limite_de_pillow_tambien_deja_el_job_e
     cargar_job(redis, "j1", [png(imagen_rgb(40, 40))])
     canal = CanalQuePublica()
 
-    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(canal, b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2, ahora_ms=reloj(1761055392500))(canal, b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "estado") == b"failed"
     assert [e for e in canal.eventos if e[0] == "publicar"] == []
@@ -231,7 +240,7 @@ def test_un_job_que_ya_no_esta_en_cola_no_se_reparte_de_nuevo(redis, estado, con
     antes = foto(redis)
     canal = CanalQuePublica()
 
-    split.manejador(redis, partes=2)(canal, b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2)(canal, b'{"job_id": "j1"}')
 
     assert foto(redis) == antes
     assert [e for e in canal.eventos if e[0] == "publicar"] == []
@@ -242,7 +251,7 @@ def test_un_job_inexistente_avisa_y_no_toca_nada(redis, caplog):
     antes = foto(redis)
     canal = CanalQuePublica()
 
-    split.manejador(redis, partes=2, log=logging.getLogger("test"))(canal, b'{"job_id": "vencido"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2, log=logging.getLogger("test"))(canal, b'{"job_id": "vencido"}')
 
     assert foto(redis) == antes
     assert [e for e in canal.eventos if e[0] == "publicar"] == []
@@ -253,9 +262,9 @@ def test_un_job_inexistente_avisa_y_no_toca_nada(redis, caplog):
 def test_las_entradas_se_borran_despues_de_publicar(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(6, 4)), png(imagen_rgb(5, 4))])
 
-    split.manejador(redis, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
 
-    assert redis.keys("job:j1:entrada:*") == []
+    assert redis.keys("job:j1:entrada:*") == [] and entradas_en_el_bucket(redis, "j1") == []
 
 
 class CanalQueSeCorta(CanalQuePublica):
@@ -271,12 +280,12 @@ def test_si_se_corta_al_publicar_el_job_se_puede_repetir_entero(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(6, 4))])
 
     with pytest.raises(pika.exceptions.StreamLostError):
-        split.manejador(redis, partes=2)(CanalQueSeCorta(), b'{"job_id": "j1"}')
+        split.manejador(redis, almacen=redis.almacen, partes=2)(CanalQueSeCorta(), b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "estado") == b"queued"
     assert redis.exists("job:j1:entrada:0")
     canal = CanalQuePublica()
-    split.manejador(redis, partes=2)(canal, b'{"job_id": "j1"}')  # el redelivery
+    split.manejador(redis, almacen=redis.almacen, partes=2)(canal, b'{"job_id": "j1"}')  # el redelivery
     assert sum(e[0] == "publicar" for e in canal.eventos) == 2
 
 
@@ -287,7 +296,7 @@ def test_si_se_corta_al_publicar_el_job_se_puede_repetir_entero(redis):
 def test_la_geometria_y_los_fragmentos_vencen_con_el_ttl(redis, archivos):
     cargar_job(redis, "j1", archivos)
 
-    split.manejador(redis, partes=2, ttl=3600)(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2, ttl=3600)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     escritas = redis.keys("job:j1:frag:*") + redis.keys("job:j1:geometria:*")
     assert escritas
@@ -310,21 +319,21 @@ class CanalConJoinerRapido(CanalQuePublica):
 def test_si_el_job_termina_mientras_se_publica_el_split_no_pisa_done(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(6, 4))])
 
-    split.manejador(redis, partes=2, ahora_ms=reloj(1000, 1300))(CanalConJoinerRapido(redis, 2), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2, ahora_ms=reloj(1000, 1300))(CanalConJoinerRapido(redis, 2), b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "estado") == b"done"
     assert redis.hget("job:j1", "fragmentos_total") == b"2"
     assert redis.hget("job:j1", "t_split_ms") == b"300"
-    assert redis.keys("job:j1:entrada:*") == []
+    assert redis.keys("job:j1:entrada:*") == [] and entradas_en_el_bucket(redis, "j1") == []
 
 
 def test_un_job_failed_tambien_borra_las_entradas(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(6, 4)), b"no soy una imagen"])
 
-    split.manejador(redis, partes=2, ahora_ms=reloj(1761055392500))(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2, ahora_ms=reloj(1761055392500))(CanalQuePublica(), b'{"job_id": "j1"}')
 
     assert redis.hget("job:j1", "estado") == b"failed"
-    assert redis.keys("job:j1:entrada:*") == []
+    assert redis.keys("job:j1:entrada:*") == [] and entradas_en_el_bucket(redis, "j1") == []
 
 
 # Métricas (contrato §11). El registro de Prometheus es global: cada test mira cuánto sumó.
@@ -346,7 +355,7 @@ def test_cada_job_partido_suma_uno_con_lo_que_tardo(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(9, 4))])
     antes = metricas_del_split()
 
-    split.manejador(redis, partes=3, ahora_ms=reloj(1000, 1250))(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=3, ahora_ms=reloj(1000, 1250))(CanalQuePublica(), b'{"job_id": "j1"}')
 
     assert diferencia(antes) == [1, 0, pytest.approx(0.25), 0]
 
@@ -355,7 +364,7 @@ def test_un_archivo_que_no_se_decodifica_cuenta_como_error_archivo_invalido(redi
     cargar_job(redis, "j1", [b"no soy una imagen"])
     antes = metricas_del_split()
 
-    split.manejador(redis, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=2)(CanalQuePublica(), b'{"job_id": "j1"}')
 
     assert diferencia(antes) == [0, 1, 0, 1]
 
@@ -366,7 +375,7 @@ def test_un_job_que_no_existe_o_ya_se_repartio_no_cuenta(redis):
     antes = metricas_del_split()
 
     for job_id in ("j1", "no-existe"):
-        split.manejador(redis, partes=2)(CanalQuePublica(), json.dumps({"job_id": job_id}).encode())
+        split.manejador(redis, almacen=redis.almacen, partes=2)(CanalQuePublica(), json.dumps({"job_id": job_id}).encode())
 
     assert diferencia(antes) == [0, 0, 0, 0]
 
@@ -375,7 +384,7 @@ def test_un_job_que_va_a_la_dlq_cuenta_como_error(redis):
     antes = metricas_del_split()
 
     with pytest.raises(ValueError):
-        split.manejador(redis, partes=2)(CanalQuePublica(), b"no es json")
+        split.manejador(redis, almacen=redis.almacen, partes=2)(CanalQuePublica(), b"no es json")
 
     assert diferencia(antes) == [0, 1, 0, 0]
 
@@ -440,7 +449,7 @@ class CanalDeRabbit(CanalQuePublica):
 def test_con_partes_dinamicas_la_cola_se_declara_antes_de_medirla(redis):
     cargar_job(redis, "j1", [png(imagen_rgb(400, 600))])
     canal = CanalDeRabbit()
-    split.manejador(redis, partes=0)(canal, b'{"job_id": "j1"}')
+    split.manejador(redis, almacen=redis.almacen, partes=0)(canal, b'{"job_id": "j1"}')
     assert not canal.cerrado
     assert canal.eventos[0] == ("declarar", f"sobel.tareas.{IMAGEN}")
     assert [e[0] for e in canal.eventos[1:]] == ["publicar"] * int(redis.hget("job:j1", "fragmentos_total"))

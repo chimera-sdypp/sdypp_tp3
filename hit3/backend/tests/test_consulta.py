@@ -1,6 +1,7 @@
 import json
 
 from backend import jobs
+from comun import almacen
 from conftest import IMAGEN, enviar, pasos, png, token
 
 
@@ -36,11 +37,11 @@ def test_job_en_proceso_con_lo_que_escribieron_los_otros_servicios(cliente, redi
     assert contenido["workers"] == ["w-a", "w-b"] and contenido["reintentos"] == 1
 
 
-def test_job_terminado_y_su_resultado(cliente, redis, worker):
+def test_job_terminado_y_su_resultado(cliente, redis, bucket, worker):
     job_id = crear(cliente, archivos=[png(), png()])
     creado = int(redis.hget(f"job:{job_id}", "creado"))
     redis.hset(f"job:{job_id}", mapping={"estado": "done", "terminado": creado + 4500, "t_join_ms": 80})
-    redis.set(f"job:{job_id}:resultado:1", b"PNG-1")
+    almacen.escribir(redis, bucket, f"job:{job_id}:resultado:1", b"PNG-1", 60)
     contenido = ver(cliente, job_id).json()["contenido"]
     assert contenido["resultados"] == [f"/jobs/{job_id}/resultado/0", f"/jobs/{job_id}/resultado/1"]
     assert contenido["tiempos_s"]["total"] == 4.5 and contenido["tiempos_s"]["join"] == 0.08

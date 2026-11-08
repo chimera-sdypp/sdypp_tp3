@@ -7,6 +7,8 @@ import pytest
 from PIL import Image
 from prometheus_client import REGISTRY
 
+from comun import almacen
+from comun.almacen import AlmacenMemoria
 from joiner import joiner
 from split import split
 from worker import worker
@@ -37,7 +39,10 @@ class Canal:
 
 @pytest.fixture
 def redis():
-    return fakeredis.FakeRedis()
+    # Los píxeles van al bucket y Redis guarda el puntero (contrato §10): el bucket de prueba viaja con el Redis.
+    cliente = fakeredis.FakeRedis()
+    cliente.almacen = AlmacenMemoria()
+    return cliente
 
 
 def preparar_job(redis, archivos=1):
@@ -55,7 +60,7 @@ def preparar_archivo(redis, archivo=0, corrimiento=0):
     imagen = (np.arange(24, dtype=np.uint8).reshape(6, 4) + corrimiento) * 10
     redis.hset(f"job:j1:geometria:{archivo}", mapping={"total": 3, "0": "0,2", "1": "0,2", "2": "0,2"})
     for f in range(3):
-        redis.set(f"job:j1:frag:{archivo}:{f}:1", png(imagen[2 * f:2 * f + 2]))
+        almacen.escribir(redis, redis.almacen, f"job:j1:frag:{archivo}:{f}:1", png(imagen[2 * f:2 * f + 2]), 86400)
     return imagen
 
 
@@ -75,9 +80,13 @@ def mensaje_resultado(job_id="j1", archivo=0, fragmento=0):
 DOS_UNIONES = (1761055395000, 1761055395040, 1761055396000, 1761055396030, 1761055396050)
 
 
+def fragmentos_en_el_bucket(redis):
+    return [nombre for nombre in redis.almacen.objetos if "/frag/" in nombre]
+
+
 def manejador(redis, **opciones):
     opciones = {"ahora_ms": reloj(1761055395000, 1761055395040, 1761055395050), **opciones}
-    return joiner.manejador(redis, **opciones)
+    return joiner.manejador(redis, almacen=redis.almacen, **opciones)
 
 
 def test_un_fragmento_completo_se_cuenta_y_todavia_no_se_une(redis):
@@ -97,9 +106,9 @@ def test_con_el_ultimo_fragmento_une_el_archivo_lo_marca_y_borra_el_ultimo_paso(
     for f in (2, 0, 1):  # en cualquier orden
         procesar(Canal(), mensaje_resultado(fragmento=f))
 
-    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:0")), imagen)
+    np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, "job:j1:resultado:0")), imagen)
     assert redis.smembers("job:j1:unidos") == {b"0"}
-    assert redis.keys("job:j1:frag:*") == []
+    assert redis.keys("job:j1:frag:*") == [] == fragmentos_en_el_bucket(redis)
 
 
 def test_con_todos_los_archivos_unidos_el_job_pasa_a_done(redis):
@@ -134,13 +143,13 @@ def test_un_archivo_completo_se_une_sin_esperar_a_los_otros_y_el_job_cierra_con_
     for f in range(3):
         procesar(Canal(), mensaje_resultado(archivo=1, fragmento=f))
 
-    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:1")), segundo)
+    np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, "job:j1:resultado:1")), segundo)
     assert not redis.exists("job:j1:resultado:0") and redis.hget("job:j1", "estado") == b"processing"
 
     for f in range(3):
         procesar(Canal(), mensaje_resultado(archivo=0, fragmento=f))
 
-    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:0")), primero)
+    np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, "job:j1:resultado:0")), primero)
     assert redis.hget("job:j1", "estado") == b"done"
     assert redis.lrange("terminados", 0, -1) == [b"done 5050"]
 
@@ -185,27 +194,27 @@ def test_la_reentrega_de_un_fragmento_ya_contado_une_el_archivo_que_quedo_sin_un
 
     manejador(redis)(Canal(), mensaje_resultado(fragmento=2))
 
-    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:0")), imagen)
-    assert redis.smembers("job:j1:unidos") == {b"0"} and redis.keys("job:j1:frag:*") == []
+    np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, "job:j1:resultado:0")), imagen)
+    assert redis.smembers("job:j1:unidos") == {b"0"} and redis.keys("job:j1:frag:*") == [] == fragmentos_en_el_bucket(redis)
     assert redis.hmget("job:j1", "estado", "completos") == [b"done", b"3"]
 
 
 def test_la_reentrega_con_el_resultado_escrito_pero_sin_marcar_vuelve_a_unir_y_lo_marca(redis):
     imagen = preparar_archivo_terminado(redis)
     contado_entero(redis)
-    redis.set("job:j1:resultado:0", b"de la pasada que se cayo")
+    almacen.escribir(redis, redis.almacen, "job:j1:resultado:0", b"de la pasada que se cayo", 86400)
 
     manejador(redis)(Canal(), mensaje_resultado(fragmento=0))
 
-    np.testing.assert_array_equal(leer(redis.get("job:j1:resultado:0")), imagen)
-    assert redis.smembers("job:j1:unidos") == {b"0"} and redis.keys("job:j1:frag:*") == []
+    np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, "job:j1:resultado:0")), imagen)
+    assert redis.smembers("job:j1:unidos") == {b"0"} and redis.keys("job:j1:frag:*") == [] == fragmentos_en_el_bucket(redis)
     assert redis.hmget("job:j1", "t_join_ms", "estado") == [b"40", b"done"]
 
 
 def test_la_reentrega_con_todos_los_archivos_unidos_cierra_el_job_que_quedo_abierto(redis):
     preparar_archivo_terminado(redis)
     contado_entero(redis)
-    redis.set("job:j1:resultado:0", b"unido")
+    almacen.escribir(redis, redis.almacen, "job:j1:resultado:0", b"unido", 86400)
     redis.sadd("job:j1:unidos", 0)
     redis.delete(*redis.keys("job:j1:frag:*"))
 
@@ -213,7 +222,7 @@ def test_la_reentrega_con_todos_los_archivos_unidos_cierra_el_job_que_quedo_abie
 
     assert redis.hmget("job:j1", "estado", "terminado") == [b"done", b"1761055395050"]
     assert redis.lrange("terminados", 0, -1) == [b"done 4050"]
-    assert redis.get("job:j1:resultado:0") == b"unido"
+    assert almacen.leer(redis, redis.almacen, "job:j1:resultado:0") == b"unido"
 
 
 def test_un_duplicado_despues_de_cerrar_el_job_no_cambia_nada(redis):
@@ -290,7 +299,7 @@ class OtraReplicaUneEnElMedio:
         return getattr(self.redis, nombre)
 
     def mget(self, claves):
-        self.redis.set("job:j1:resultado:0", b"de la otra replica")
+        almacen.escribir(self.redis, self.redis.almacen, "job:j1:resultado:0", b"de la otra replica", 86400)
         self.redis.sadd("job:j1:unidos", 0)
         self.redis.delete(*claves)
         return self.redis.mget(claves)
@@ -304,7 +313,7 @@ def test_si_otra_replica_une_el_archivo_mientras_lo_lee_vuelve_sin_error_y_sin_p
 
     manejador(OtraReplicaUneEnElMedio(redis))(Canal(), mensaje_resultado(fragmento=2))
 
-    assert redis.get("job:j1:resultado:0") == b"de la otra replica"
+    assert almacen.leer(redis, redis.almacen, "job:j1:resultado:0") == b"de la otra replica"
     assert redis.hget("job:j1", "t_join_ms") is None
 
 
@@ -329,14 +338,14 @@ def cargar_job(redis, job_id, archivos, operaciones):
         "usuario": "ana", "estado": "queued", "creado": CREADO, "operaciones": json.dumps(operaciones),
         "archivos": len(archivos), "fragmentos_total": 0, "completos": 0})
     for a, datos in enumerate(archivos):
-        redis.set(f"job:{job_id}:entrada:{a}", datos)
+        almacen.escribir(redis, redis.almacen, f"job:{job_id}:entrada:{a}", datos, 86400)
 
 
 def procesar_job(redis, job_id, partes):
     """Split, después el worker sobre cada tarea y el joiner sobre cada fragmento completo, hasta que no queda nada."""
     canal = CanalQuePublica()
-    split.manejador(redis, partes=partes)(canal, json.dumps({"job_id": job_id}).encode())
-    trabajador, uniones = worker.manejador(redis, nombre="w1"), joiner.manejador(redis)
+    split.manejador(redis, almacen=redis.almacen, partes=partes)(canal, json.dumps({"job_id": job_id}).encode())
+    trabajador, uniones = worker.manejador(redis, almacen=redis.almacen, nombre="w1"), joiner.manejador(redis, almacen=redis.almacen)
     while canal.eventos:
         exchange, cuerpo = canal.eventos.pop(0)
         (uniones if exchange == "sobel.resultados" else trabajador)(canal, cuerpo)
@@ -372,9 +381,9 @@ def test_cada_archivo_del_job_sale_igual_que_aplicarle_la_cadena_entero(redis, n
     # 13 y 7 filas dan 4 fragmentos cada una y 3 filas dan 3: uno por fila.
     assert redis.hmget("job:j1", "fragmentos_total", "completos") == [b"11", b"11"]
     for archivo, original in enumerate(originales):
-        np.testing.assert_array_equal(leer(redis.get(f"job:j1:resultado:{archivo}")),
+        np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, f"job:j1:resultado:{archivo}")),
                                       aplicar_entera(original, operaciones))
-    assert redis.keys("job:j1:frag:*") == []
+    assert redis.keys("job:j1:frag:*") == [] == fragmentos_en_el_bucket(redis)
 
 
 def test_con_sobel_solo_cada_archivo_es_identico_al_sobel_centralizado_del_hit1(redis, sobel_hit1):
@@ -385,7 +394,7 @@ def test_con_sobel_solo_cada_archivo_es_identico_al_sobel_centralizado_del_hit1(
     procesar_job(redis, "j1", partes=4)
 
     for archivo, original in enumerate(originales):
-        np.testing.assert_array_equal(leer(redis.get(f"job:j1:resultado:{archivo}")),
+        np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, f"job:j1:resultado:{archivo}")),
                                       sobel_hit1.aplicar(sobel_hit1.leer_gris(png(original))))
 
 

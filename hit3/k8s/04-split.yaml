@@ -65,6 +65,7 @@ spec:
 
       # --- Autenticación para Imágenes Privadas (Requisito R1) ---
       # Permite a Kubernetes autenticarse contra GitHub Packages (GHCR) para bajar la imagen
+      serviceAccountName: sobel-almacen  # entra al bucket de los píxeles (02-almacen.yaml)
       imagePullSecrets:
         - name: ghcr-secret
 

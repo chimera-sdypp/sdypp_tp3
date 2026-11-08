@@ -11,6 +11,7 @@ from backend import auth
 from backend.app import crear_app
 from backend.config import Config
 from backend.rabbit import NoDisponible
+from comun.almacen import AlmacenMemoria
 
 SECRETO = "s" * 32
 IMAGEN = "ghcr.io/chimera-sdypp/sobel-worker:1.0.0"
@@ -57,6 +58,12 @@ def redis():
 
 
 @pytest.fixture
+def bucket():
+    """El bucket de los píxeles, en memoria (contrato §10)."""
+    return AlmacenMemoria()
+
+
+@pytest.fixture
 def rabbit():
     return RabbitFalso()
 
@@ -67,9 +74,9 @@ def config():
 
 
 @pytest.fixture
-def cliente(config, redis, rabbit, tmp_path, monkeypatch):
+def cliente(config, redis, rabbit, bucket, tmp_path, monkeypatch):
     monkeypatch.setenv("SOBEL_LOGS", str(tmp_path))
-    app = crear_app(config, redis, rabbit, mantener=False)
+    app = crear_app(config, redis, rabbit, mantener=False, almacen=bucket)
     return TestClient(app, raise_server_exceptions=False)
 
 

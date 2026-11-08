@@ -44,12 +44,16 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+      serviceAccountName: sobel-almacen  # entra al bucket de los píxeles (02-almacen.yaml)
       imagePullSecrets:
         - name: ghcr-secret
       containers:
         - name: joiner
           image: ghcr.io/chimera-sdypp/sobel-joiner:1.1.1
           imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: sobel-almacen  # SOBEL_ALMACEN_BUCKET y, en el k3s, SOBEL_ALMACEN_URL
           ports:
             - name: http
               containerPort: 8080

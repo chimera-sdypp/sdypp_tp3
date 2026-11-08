@@ -153,12 +153,12 @@ pasa esos jobs a `processing`: `{"reprocesados": 3, "jobs": ["3f6c2a9e-…"]}`.
 `GET /health` es público y resume el estado de **cada servicio**:
 
 ```json
-{"codigo": 200, "contenido": {"backend": "ok", "redis": "ok", "rabbitmq": "ok", "split": "ok",
+{"codigo": 200, "contenido": {"backend": "ok", "redis": "ok", "rabbitmq": "ok", "almacen": "ok", "split": "ok",
   "joiner": "ok", "reasignador": "ok", "frontend": "ok", "workers": "ok"}}
 ```
 
 Cada valor es `ok` o `caido`. `workers` está `ok` si hay al menos un worker registrado. Devuelve `503` sólo
-si el backend no puede atender (Redis o RabbitMQ caídos); un `caido` en otro servicio es informativo y sigue en `200`.
+si el backend no puede atender (Redis, RabbitMQ o el bucket de los píxeles caídos, §10); un `caido` en otro servicio es informativo y sigue en `200`.
 
 ## 6. Errores
 
@@ -248,7 +248,7 @@ conectarse: si dos servicios declaran la misma cola con argumentos distintos, Ra
 - Quien publica a una `sobel.tareas.<imagen>` la declara antes. La declaración es idempotente y evita que un mensaje
   se pierda si todavía no arrancó ningún worker de esa imagen.
 - Mensajes JSON (`content_type: application/json`) y persistentes (`delivery_mode: 2`). Los píxeles **no viajan
-  por RabbitMQ**: van en Redis y el mensaje lleva la clave.
+  por RabbitMQ** ni se guardan en Redis: van al bucket (§10), y el mensaje lleva la clave de Redis del puntero.
 - **A la DLQ** llega un mensaje cuando su consumidor hace `nack` sin reencolar (error al procesarlo, timeout del
   worker) o cuando muere con el mensaje en la mano más veces que `x-delivery-limit` (crash, OOM). Puede ser una
   tarea, un job del split o un fragmento completo del joiner. El reasignador los distingue por el header
@@ -306,7 +306,19 @@ dos primeras no se arreglan reintentando: gastan los reintentos y el job termina
 duplicado: el joiner no cuenta un duplicado, pero revisa igual si hay algo para unir o cerrar (§10), porque el
 original pudo haberse contado justo antes de una caída del joiner.
 
-## 10. Redis
+## 10. Redis y el bucket de los píxeles
+
+**Redis guarda el estado; los píxeles van a un bucket.** Las imágenes de entrada, los fragmentos y los resultados se
+suben a un almacenamiento de objetos (Cloud Storage en GKE; el emulador de su API, fake-gcs-server, en el k3s) y en
+Redis queda sólo el **puntero**: el valor de `job:<id>:entrada:<a>`, `job:<id>:frag:…` y `job:<id>:resultado:<a>` es el
+nombre del objeto (`job/<id>/entrada/<a>.png`: la clave con `/` en vez de `:`). Así la memoria de Redis no crece con el
+tamaño de las imágenes (antes las guardaba enteras y una carga de 100 MB por pedido lo llevaba al límite y lo mataba,
+OOM). Se escribe primero el objeto y después el puntero, y se borra primero el puntero y después el objeto: un puntero
+nunca apunta a nada, y si algo se corta en el medio queda un objeto huérfano, que borra la regla del bucket. En GKE los
+objetos vencen al día (regla de ciclo de vida del bucket), como las claves de Redis. Los pods entran con la cuenta de
+servicio de Kubernetes `sobel-almacen`, por Workload Identity: sin claves. Si el bucket no responde, el backend contesta
+`503 SERVICIO_NO_DISPONIBLE` y los consumidores reencolan el mensaje (`ALMACEN_CAIDO`, §11). El código está en
+`hit3/comun/almacen.py`.
 
 Todas las claves de un job empiezan con `job:<id>` y vencen a las 24 h (`SOBEL_TTL`). Se arman con
 `hit3/comun/claves.py`, como las colas con `colas.py`: una clave mal escrita no falla, sólo hace que un servicio no
@@ -317,12 +329,12 @@ escriben a mano.
 |---|---|---|---|
 | `job:<id>` | hash | ver abajo | `usuario`, `estado`, `creado` y `terminado` (ms), `operaciones` (JSON), `archivos`, `fragmentos_total`, `completos`, `en_dlq`, `reintentos`, `t_split_ms`, `t_join_ms`, `cola_ms` y `cola_n`, `proc_ms` y `proc_n` (suma y cantidad, para el promedio), `error` (JSON) |
 | `job:<id>:workers` | set | worker → backend | Workers que procesaron algo |
-| `job:<id>:entrada:<a>` | string | backend → split | El archivo original. El split lo borra |
+| `job:<id>:entrada:<a>` | string | backend → split | Puntero al archivo original en el bucket. El split lo borra (puntero y objeto) |
 | `job:<id>:geometria:<a>` | hash | split → joiner | `total` (fragmentos del archivo) y, por fragmento `<f>`, `"<filas_extra_arriba>,<filas>"` |
-| `job:<id>:frag:<a>:<f>:<paso>` | string | split (paso 0), worker (paso k + 1) → worker, joiner | El fragmento en PNG. `paso` = cantidad de operaciones ya aplicadas |
+| `job:<id>:frag:<a>:<f>:<paso>` | string | split (paso 0), worker (paso k + 1) → worker, joiner | Puntero al fragmento en PNG en el bucket. `paso` = cantidad de operaciones ya aplicadas |
 | `job:<id>:listos:<a>` | set | joiner | Fragmentos del archivo que terminaron todos los pasos |
 | `job:<id>:unidos` | set | joiner | Archivos ya unidos |
-| `job:<id>:resultado:<a>` | string | joiner → backend | La imagen final en PNG |
+| `job:<id>:resultado:<a>` | string | joiner → backend | Puntero a la imagen final en PNG en el bucket |
 | `jobs`, `jobs:<usuario>` | zset | backend | `job_id` con la hora de creación como puntaje |
 | `terminados` | list | joiner, split, reasignador → backend | `"<estado> <ms totales>"` de las últimas 1000 terminaciones de jobs (`LPUSH` + `LTRIM`), para `/stats`. Un job reprocesado (§3) puede tener más de una |
 | `worker:<id>` | hash, vence a los 15 s | worker → backend, frontend | `<id>` es el hostname (pod o VM). `imagen`, `operaciones` (separadas por coma), `host`. El worker lo renueva cada 5 s |
@@ -438,10 +450,12 @@ conexión está caída. Las conexiones a RabbitMQ y Redis se reintentan con back
 | `SOBEL_PUERTO` | todos | `8080` | Puerto HTTP |
 | `BACKEND_URL` | frontend | — | URL interna del backend (`http://backend:8080`), para validar el token de `/eventos` |
 | `SOBEL_TTL` | todos | `86400` | Segundos que viven las claves de un job |
+| `SOBEL_ALMACEN_BUCKET` | backend, split, worker, joiner | — | El bucket de los píxeles (§10), del ConfigMap `sobel-almacen` |
+| `SOBEL_ALMACEN_URL` | backend, split, worker, joiner | Cloud Storage | Sólo para el emulador (`http://almacen:4443` en el k3s): sin ella, la API de Cloud Storage con Workload Identity |
 | `SOBEL_LIMITE_ENTREGAS` | todos | `3` | `x-delivery-limit` de las `sobel.tareas.<imagen>`, `sobel.split` y `sobel.joiner`. Igual en todos, frontend incluido: todos declaran las colas (§9) |
 | `SOBEL_SECRETO` | backend | — | Firma de los JWT (Secret) |
 | `SOBEL_IMAGENES_PERMITIDAS` | backend | — | Imágenes de worker permitidas, separadas por coma |
-| `SOBEL_SERVICIOS` | backend | — | `nombre=url` separados por coma: la URL completa del `/health` de cada servicio que resume el público (`split=http://split:8080/health`). Sin `backend`, `redis`, `rabbitmq` ni `workers`, que los informa el backend |
+| `SOBEL_SERVICIOS` | backend | — | `nombre=url` separados por coma: la URL completa del `/health` de cada servicio que resume el público (`split=http://split:8080/health`). Sin `backend`, `redis`, `rabbitmq`, `almacen` ni `workers`, que los informa el backend |
 | `SOBEL_PEDIDOS_POR_MINUTO` | backend | `120` | Límite por usuario |
 | `SOBEL_PARTES` | split | `4` | Fragmentos por archivo (menos si la imagen tiene menos filas) |
 | `SOBEL_IMAGEN` | worker | — | La referencia de su propia imagen; tiene que coincidir con la de `SOBEL_IMAGENES_PERMITIDAS` |

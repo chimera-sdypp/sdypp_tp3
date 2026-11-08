@@ -162,6 +162,12 @@ jobs:
         run: pip install -r comun/requirements-dev.txt -r split/requirements-dev.txt -r worker/requirements-dev.txt -r joiner/requirements-dev.txt -r reasignador/requirements-dev.txt
       - name: Tests de comun
         run: python -m pytest -v comun
+      # El emulador de la API de GCS: los services de Actions no le pueden pasar argumentos, así que va con docker run.
+      - name: Integración del bucket de los píxeles con el emulador de GCS
+        run: |
+          docker run -d --name almacen -p 4443:4443 fsouza/fake-gcs-server:1.56.1 -scheme http -port 4443
+          for i in $(seq 30); do curl -sf http://localhost:4443/storage/v1/b > /dev/null && break; sleep 1; done
+          SOBEL_ALMACEN_URL=http://localhost:4443 python -m pytest -v -m integracion comun
       - name: Tests del split
         run: python -m pytest -v split
       - name: Tests del worker
