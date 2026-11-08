@@ -18,13 +18,6 @@ kind: Kustomization
 namespace: chimera-sobel
 resources:
   - ../k8s
-images:
-  - {name: ghcr.io/chimera-sdypp/sobel-backend, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-frontend, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-split, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-worker, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-joiner, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-reasignador, newTag: sha-7d4d1cd}
 patches:
   # El bucket es el de Cloud Storage: ni el emulador ni su URL.
   - patch: |-

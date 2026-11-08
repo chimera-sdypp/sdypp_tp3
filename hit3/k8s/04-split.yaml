@@ -71,7 +71,7 @@ spec:
 
       containers:
         - name: split
-          image: ghcr.io/chimera-sdypp/sobel-split:1.1.1
+          image: ghcr.io/chimera-sdypp/sobel-split:1.1.2
           imagePullPolicy: IfNotPresent # Solo descarga la imagen si no está en la caché del nodo
           ports:
             - name: http
