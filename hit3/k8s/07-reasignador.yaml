@@ -48,7 +48,7 @@ spec:
         - name: ghcr-secret
       containers:
         - name: reasignador
-          image: ghcr.io/chimera-sdypp/sobel-reasignador:1.1.1
+          image: ghcr.io/chimera-sdypp/sobel-reasignador:1.1.2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

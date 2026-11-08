@@ -8,8 +8,8 @@ kubectl apply -k hit3/k8s/
 
 TOKEN=$(kubectl -n sobel exec deploy/backend -- python -m backend.emitir_token ana usuario)
 curl -s -X POST http://localhost/jobs -H "Authorization: Bearer $TOKEN" -F archivos=@gato.png \
-  -F 'operaciones=[{"operacion":"grises","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.1"},
-                   {"operacion":"sobel","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.1"}]'
+  -F 'operaciones=[{"operacion":"grises","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.2"},
+                   {"operacion":"sobel","imagen":"ghcr.io/chimera-sdypp/sobel-worker:1.1.2"}]'
 curl -s http://localhost/jobs/<job_id> -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -22,7 +22,8 @@ En la nube corre en el GKE `tp3` del proyecto `tp3distribuidos` (compartido con 
 [`k8s-gke/`](k8s-gke/kustomization.yaml) y el monitoreo con [`k8s-gke/monitoreo.sh`](k8s-gke/monitoreo.sh); un token
 para la página o la API sale de `kubectl -n chimera-sobel exec deploy/backend -- python -m backend.emitir_token <usuario> <usuario|admin> --horas 24`.
 
-Tests: `pytest` en cada carpeta de servicio, y `pytest -m integracion` con `RABBITMQ_URL` y `REDIS_URL`.
+Tests: `pytest` en cada carpeta de servicio, y `pytest -m integracion` con `RABBITMQ_URL` y `REDIS_URL` (en `comun`,
+con `SOBEL_ALMACEN_URL` del emulador de GCS).
 Evidencia: [`evidencia/r1.sh`](evidencia/r1.sh) (registry privado), [`evidencia/r4.sh`](evidencia/r4.sh) (roles y
 réplicas sin estado), [`evidencia/r_dlq.sh`](evidencia/r_dlq.sh) (falla provocada: reintentos → DLQ → agotados →
 reprocesar; salida en [`r_dlq-k3s.txt`](evidencia/r_dlq-k3s.txt)) y la carga con k6 en
@@ -45,27 +46,32 @@ flowchart LR
     end
     subgraph infra["pool infra"]
         MQ[(RabbitMQ x3)]
-        RD[(Redis)]
+        RD[(Redis: estado y punteros)]
         P[Prometheus y Grafana]
     end
+    BK[("bucket: píxeles (Cloud Storage, fuera del cluster)")]
     B -->|sobel.split| S
     S -->|"sobel.tareas.imagen"| W
     W -->|sobel.resultados| J
     F -.->|avance del job| RD
+    B & S & W & J -.->|píxeles| BK
     W -.->|sobel.dlq| R -.->|reintento| W
     apps & fuera --- infra
 ```
 
-Las flechas entre servicios son colas de RabbitMQ; los píxeles y el estado de cada job viven en Redis.
+Las flechas entre servicios son colas de RabbitMQ; el estado de cada job vive en Redis y los píxeles, en el bucket.
 
 ## Decisiones
 
-- **Asincrónico.** `POST /jobs` valida todo, guarda las imágenes en Redis, encola y responde `202` al instante. El
+- **Asincrónico.** `POST /jobs` valida todo, sube las imágenes al bucket, encola y responde `202` al instante. El
   estado se consulta con `GET /jobs/{id}`; la página además recibe cada fragmento terminado por Server-Sent Events.
 - **Una cola por imagen de worker** (`sobel.tareas.<imagen>`). El pedido elige operación e imagen en cada paso, y dos
   versiones del worker pueden convivir (R2). Cada worker anota en Redis su imagen y sus operaciones, y el backend
   rechaza antes de encolar lo que nadie ofrece.
-- **Los píxeles van por Redis**, no por RabbitMQ: los mensajes llevan claves y quedan chicos.
+- **Los píxeles van a un bucket**, no a Redis ni a RabbitMQ: Redis guarda el estado del job y un puntero por imagen,
+  y los mensajes llevan claves y quedan chicos. Antes iban enteros a Redis y una carga de imágenes de 100 MB lo llenaba
+  hasta que lo mataba (OOM). En GKE es Cloud Storage con Workload Identity, sin claves; en el k3s, un emulador de su
+  API ([contrato §10](contrato.md#10-redis-y-el-bucket-de-los-píxeles)).
 - **Fragmentos con filas de borde.** El split agrega una fila arriba y abajo por cada operación de vecindad y el joiner
   las recorta: el resultado es idéntico al del Hit #1.
 - **Fallas.** Colas quorum con `x-delivery-limit`: un worker que muere o hace `nack` manda la tarea a la DLQ. El

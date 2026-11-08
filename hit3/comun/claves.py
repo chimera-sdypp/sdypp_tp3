@@ -1,5 +1,8 @@
 """Claves de Redis del contrato (§10). Todos los servicios las arman acá: una clave mal escrita no falla,
-sólo hace que un servicio no encuentre lo que escribió otro."""
+sólo hace que un servicio no encuentre lo que escribió otro.
+
+Las de píxeles (`entrada`, `fragmento` y `resultado`) guardan el puntero al objeto del bucket, no los bytes: se leen y
+se escriben con `comun.almacen`."""
 
 TERMINADOS = "terminados"
 

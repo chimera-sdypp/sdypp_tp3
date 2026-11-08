@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 
+from comun import almacen as punteros
 from comun import claves, colas, conexion, metricas, pixeles, registro, salud
 from worker.operaciones import OPERACIONES
 
@@ -68,8 +69,10 @@ def mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms):
 
 
 def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), funciones=OPERACIONES, timeout=TIMEOUT_POR_DEFECTO,
-              ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.worker")):
+              ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms, log=logging.getLogger("tp3.worker"), *, almacen):
     """Devuelve el callback(canal, cuerpo) que `consumir` llama por cada tarea; lo que escribe vence en `ttl` s.
+
+    Los fragmentos se leen y se escriben en el bucket; en Redis queda sólo el puntero (contrato §10).
 
     Una excepción (operación no ofrecida, fragmento ilegible, timeout) hace que `consumir` mande la tarea a la DLQ.
     """
@@ -91,7 +94,7 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), funciones=OPERACIONES
         with metricas.fallos("worker", operacion):
             if operacion not in ofrecidas:
                 raise OperacionNoOfrecida(f"este worker no ofrece {operacion} (ofrece: {', '.join(ofrecidas)})")
-            datos = redis.get(clave_entrada)
+            datos = punteros.leer(redis, almacen, clave_entrada)
             if datos is None and redis.exists(clave_salida):
                 # Redelivery de una tarea que ya terminó: se cortó entre el borrado de la entrada y el ack. La salida
                 # está escrita; sólo falta mandarla. Sin sumar tiempos: ya se contaron (y no se sabe cuánto tardó).
@@ -110,7 +113,7 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), funciones=OPERACIONES
             with tiempo_limite(timeout):
                 salida = funciones[operacion](entrada)
             proc_ms = ahora_ms() - inicio
-            redis.set(clave_salida, pixeles.a_png(salida), ex=ttl)
+            punteros.escribir(redis, almacen, clave_salida, pixeles.a_png(salida), ttl)
             destino = mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms)
             log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s",
                      job_id, archivo, indice, operacion, proc_ms, destino)
@@ -123,7 +126,7 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), funciones=OPERACIONES
                 transaccion.expire(claves.workers(job_id), ttl)
                 transaccion.execute()
             # Se borra acá y no después del ack porque `consumir` hace el ack al volver del callback.
-            redis.delete(clave_entrada)
+            punteros.borrar(redis, almacen, clave_entrada)
         metricas.trabajo("worker", operacion, proc_ms / 1000)
 
     return procesar
@@ -181,10 +184,12 @@ def main():
     puerto = conexion.entero_de_entorno("SOBEL_PUERTO", 8080, 1)
     nombre = socket.gethostname()  # el nombre del pod (o de la VM)
     redis = conexion.cliente_redis()
+    almacen = punteros.desde_entorno()
     # Antes de conectarse: mientras espera con backoff, la probe ve `caido` en vez de no tener respuesta.
     salud.servir("worker", puerto, conexion.estado, redis=redis)
     log.info("worker %s: /health en el puerto %d", nombre, puerto)
     conexion.con_backoff(redis.ping, "redis", log=log)
+    conexion.con_backoff(almacen.asegurar_bucket, "almacen", log=log)
     threading.Thread(target=anunciar_siempre, args=(redis, nombre, imagen, ofrecidas, log), daemon=True).start()
 
     def al_conectar(canal):
@@ -192,7 +197,7 @@ def main():
         return colas.declarar_tareas(canal, imagen)
 
     log.info("worker %s consumiendo sobel.tareas.%s, ofrece %s", nombre, imagen, ",".join(ofrecidas))
-    tareas = manejador(redis, nombre, ofrecidas, timeout=timeout, ttl=ttl, log=log)
+    tareas = manejador(redis, nombre, ofrecidas, timeout=timeout, ttl=ttl, log=log, almacen=almacen)
     conexion.consumir(None, tareas, al_conectar=al_conectar, cliente_redis=redis, servicio="worker", log=log)
 
 

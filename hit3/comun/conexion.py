@@ -9,7 +9,7 @@ import pika.exceptions
 import redis
 import redis.exceptions
 
-from comun import metricas
+from comun import almacen, metricas
 
 ESPERA_INICIAL = 1
 ESPERA_MAXIMA = 30
@@ -107,7 +107,8 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None, c
     Si `al_conectar` devuelve un nombre de cola, se consume esa: sirve para las colas exclusivas que
     RabbitMQ nombra en cada conexión (el frontend, contrato §9). En ese caso `cola` puede ser None.
     Si se cae RabbitMQ, reconecta con backoff; los mensajes sin ack los reencola el broker.
-    Si se cae Redis, el mensaje no tiene la culpa: vuelve a la cola y se espera a que Redis responda.
+    Si se cae Redis, el mensaje no tiene la culpa: vuelve a la cola y se espera a que Redis responda. Lo mismo si
+    no responde el bucket de los píxeles (`ALMACEN_CAIDO`), esperando ESPERA_INICIAL s antes de seguir.
     Con `servicio`, cuenta en `sobel_errores_total` (contrato §11) cada caída de Redis (`REDIS_CAIDO`) y cada nack, con
     el nombre de la excepción en mayúsculas (`TiempoAgotado` → `TIEMPO_AGOTADO`).
     """
@@ -126,6 +127,12 @@ def consumir(cola, callback, al_conectar=None, prefetch=1, cliente_redis=None, c
             contar_error("REDIS_CAIDO")
             if cliente_redis is not None:
                 con_backoff(cliente_redis.ping, "redis", dormir=dormir, log=log)
+            return
+        except almacen.NoDisponible as error:
+            log.warning("no respondió el bucket procesando un mensaje de %s (%s), lo reencolo", consumida, error)
+            canal.basic_nack(delivery_tag=metodo.delivery_tag, requeue=True)
+            contar_error("ALMACEN_CAIDO")
+            dormir(ESPERA_INICIAL)
             return
         except pika.exceptions.AMQPConnectionError:
             raise  # sin canal no hay nack: lo reencola el broker y se reconecta afuera

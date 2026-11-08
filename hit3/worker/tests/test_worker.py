@@ -11,6 +11,8 @@ import redis as redis_lib
 from PIL import Image
 from prometheus_client import REGISTRY
 
+from comun import almacen
+from comun.almacen import AlmacenMemoria
 from split import split
 from worker import worker
 from worker.operaciones import OPERACIONES
@@ -62,7 +64,10 @@ def reloj(*instantes):
 
 @pytest.fixture
 def redis():
-    return fakeredis.FakeRedis()
+    # Los píxeles van al bucket y Redis guarda el puntero (contrato §10): el bucket de prueba viaja con el Redis.
+    cliente = fakeredis.FakeRedis()
+    cliente.almacen = AlmacenMemoria()
+    return cliente
 
 
 def cargar_tarea(redis, fragmento, operaciones=cadena("grises"), paso=0, job_id="j1", archivo=0, indice=2,
@@ -73,7 +78,7 @@ def cargar_tarea(redis, fragmento, operaciones=cadena("grises"), paso=0, job_id=
     """
     redis.hsetnx(f"job:{job_id}", "estado", "processing")
     redis.expire(f"job:{job_id}", 86400)
-    redis.set(f"job:{job_id}:frag:{archivo}:{indice}:{paso}", png(fragmento))
+    almacen.escribir(redis, redis.almacen, f"job:{job_id}:frag:{archivo}:{indice}:{paso}", png(fragmento), 86400)
     return json.dumps({"job_id": job_id, "archivo": archivo, "fragmento": indice, "paso": paso,
                        "operaciones": operaciones, "intento": intento, "encolado": encolado}).encode()
 
@@ -81,7 +86,7 @@ def cargar_tarea(redis, fragmento, operaciones=cadena("grises"), paso=0, job_id=
 def manejador(redis, **opciones):
     # Recibe la tarea, 200 ms después (leer y decodificar) empieza la operación, que tarda 412 ms.
     opciones = {"nombre": "w1", "ahora_ms": reloj(1761055391100, 1761055391300, 1761055391712), **opciones}
-    return worker.manejador(redis, **opciones)
+    return worker.manejador(redis, almacen=redis.almacen, **opciones)
 
 
 def test_grises_deja_el_fragmento_en_un_canal_en_el_paso_siguiente(redis):
@@ -91,7 +96,7 @@ def test_grises_deja_el_fragmento_en_un_canal_en_el_paso_siguiente(redis):
     manejador(redis)(CanalQuePublica(), cuerpo)
 
     esperado = np.asarray(Image.fromarray(fragmento).convert("L"))
-    np.testing.assert_array_equal(leer(redis.get("job:j1:frag:0:2:1")), esperado)
+    np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, "job:j1:frag:0:2:1")), esperado)
 
 
 def test_el_ultimo_paso_publica_el_resultado_en_el_fanout(redis):
@@ -118,6 +123,7 @@ def test_un_paso_intermedio_manda_la_tarea_a_la_cola_de_la_imagen_del_paso_sigui
         "job_id": "j1", "archivo": 0, "fragmento": 2, "paso": 1, "operaciones": operaciones,
         "intento": 1, "encolado": 1761055391720})]
     assert redis.exists("job:j1:frag:0:2:1") and not redis.exists("job:j1:frag:0:2:0")
+    assert "job/j1/frag/0/2/0.png" not in redis.almacen.objetos  # la entrada también sale del bucket
 
 
 def test_el_ultimo_paso_de_una_cadena_publica_el_resultado_con_el_intento_de_esa_tarea(redis):
@@ -166,7 +172,7 @@ def test_grises_sobre_un_fragmento_de_un_canal_lo_deja_igual(redis):
 
     manejador(redis)(CanalQuePublica(), cuerpo)
 
-    np.testing.assert_array_equal(leer(redis.get("job:j1:frag:0:2:1")), fragmento)
+    np.testing.assert_array_equal(leer(almacen.leer(redis, redis.almacen, "job:j1:frag:0:2:1")), fragmento)
 
 
 # Encadenado con el split (seams S4 + S6): el job entra como lo deja el backend y sale como lo une el joiner.
@@ -178,7 +184,7 @@ def cargar_job(redis, job_id, archivos, operaciones):
         "operaciones": json.dumps(operaciones), "archivos": len(archivos),
     })
     for a, datos in enumerate(archivos):
-        redis.set(f"job:{job_id}:entrada:{a}", datos)
+        almacen.escribir(redis, redis.almacen, f"job:{job_id}:entrada:{a}", datos, 86400)
 
 
 def procesar_job(redis, job_id, partes):
@@ -188,10 +194,10 @@ def procesar_job(redis, job_id, partes):
     llegaron a sobel.resultados.
     """
     canal = CanalQuePublica()
-    split.manejador(redis, partes=partes)(canal, json.dumps({"job_id": job_id}).encode())
+    split.manejador(redis, almacen=redis.almacen, partes=partes)(canal, json.dumps({"job_id": job_id}).encode())
     resultados = []
     declaradas = set()
-    trabajador = worker.manejador(redis, nombre="w1")
+    trabajador = worker.manejador(redis, almacen=redis.almacen, nombre="w1")
     while canal.eventos:
         evento = canal.eventos.pop(0)
         if evento[0] == "declarar":
@@ -212,7 +218,7 @@ def unir(redis, job_id, archivo, paso):
     franjas = []
     for f in range(int(geometria["total"])):
         extra, filas = map(int, geometria[str(f)].split(","))
-        franjas.append(leer(redis.get(f"job:{job_id}:frag:{archivo}:{f}:{paso}"))[extra:extra + filas])
+        franjas.append(leer(almacen.leer(redis, redis.almacen, f"job:{job_id}:frag:{archivo}:{f}:{paso}"))[extra:extra + filas])
     return np.vstack(franjas)
 
 
@@ -361,7 +367,7 @@ def test_una_operacion_que_el_worker_no_ofrece_va_a_la_dlq_sin_publicar_nada(red
 @pytest.mark.parametrize("datos", [b"no soy un png", png(imagen_rgb(8, 8))[:60]], ids=["no_es_png", "png_cortado"])
 def test_un_fragmento_que_no_se_decodifica_va_a_la_dlq_sin_publicar_nada(redis, datos):
     cuerpo = cargar_tarea(redis, imagen_rgb(4, 6))
-    redis.set("job:j1:frag:0:2:0", datos)
+    almacen.escribir(redis, redis.almacen, "job:j1:frag:0:2:0", datos, 86400)
     canal = CanalQuePublica()
 
     with pytest.raises(ValueError, match="decodificar"):
@@ -440,7 +446,7 @@ def test_lo_que_se_descarta_o_se_reenvia_no_cuenta_como_tarea(redis):
     sin_nada = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"), indice=5)
     redis.delete("job:j1:frag:0:5:0")
     ya_hecha = cargar_tarea(redis, imagen_rgb(4, 6), operaciones=cadena("blur"), indice=6)
-    redis.set("job:j1:frag:0:6:1", redis.get("job:j1:frag:0:6:0"))
+    almacen.escribir(redis, redis.almacen, "job:j1:frag:0:6:1", almacen.leer(redis, redis.almacen, "job:j1:frag:0:6:0"), 86400)
     redis.delete("job:j1:frag:0:6:0")
     antes = metricas_de("blur")
 

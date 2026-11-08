@@ -48,17 +48,17 @@ def test_reprocesar_no_resucita_un_job_terminado(redis):
     assert redis.hget("job:j", "estado") == b"failed" and not redis.exists("job:vencido")
 
 
-def test_health_resume_cada_servicio(config, redis, rabbit, worker, tmp_path, monkeypatch):
+def test_health_resume_cada_servicio(config, redis, rabbit, bucket, worker, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     from backend.config import Config
     monkeypatch.setenv("SOBEL_LOGS", str(tmp_path))
     monkeypatch.setattr(modulo_app, "_consultar", lambda url: "ok" if "split" in url else "caido")
     con_servicios = Config(secreto=config.secreto, imagenes_permitidas=config.imagenes_permitidas,
                            servicios={"split": "http://split:8080/health", "joiner": "http://joiner:8080/health"})
-    cliente = TestClient(modulo_app.crear_app(con_servicios, redis, rabbit, mantener=False))
+    cliente = TestClient(modulo_app.crear_app(con_servicios, redis, rabbit, mantener=False, almacen=bucket))
     respuesta = cliente.get("/health")
     assert respuesta.status_code == 200
-    assert respuesta.json()["contenido"] == {"backend": "ok", "redis": "ok", "rabbitmq": "ok",
+    assert respuesta.json()["contenido"] == {"backend": "ok", "redis": "ok", "rabbitmq": "ok", "almacen": "ok",
                                              "split": "ok", "joiner": "caido", "workers": "ok"}
 
 
@@ -70,6 +70,12 @@ def test_health_503_si_rabbitmq_o_redis_caen(cliente, rabbit, redis, monkeypatch
     rabbit.caido = False
     monkeypatch.setattr(redis, "ping", lambda: (_ for _ in ()).throw(ConnectionError()))
     assert cliente.get("/health").json()["contenido"]["redis"] == "caido"
+
+
+def test_health_503_si_el_bucket_no_responde(cliente, bucket):
+    bucket.caido = True
+    respuesta = cliente.get("/health")
+    assert respuesta.status_code == 503 and respuesta.json()["contenido"]["almacen"] == "caido"
 
 
 def test_redis_caido_es_503(cliente, redis, monkeypatch):

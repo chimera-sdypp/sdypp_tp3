@@ -6,19 +6,35 @@
 #   kubectl create namespace chimera-sobel
 #   SOBEL_NAMESPACE=chimera-sobel GHCR_USER=<usuario> GHCR_PAT=<token read:packages> hit3/k8s/crear_secretos.sh
 #   kubectl apply -k hit3/k8s-gke
+# Los píxeles van al bucket de Cloud Storage chimera-sobel-imagenes (los objetos vencen al día). Los pods entran con la
+# cuenta de servicio de Kubernetes sobel-almacen, por Workload Identity y sin claves. El bucket y el permiso:
+#   gcloud storage buckets create gs://chimera-sobel-imagenes --project tp3distribuidos --location us-central1 \
+#     --uniform-bucket-level-access --public-access-prevention --lifecycle-file <(echo \
+#     '{"rule":[{"action":{"type":"Delete"},"condition":{"age":1}}]}')
+#   gcloud storage buckets add-iam-policy-binding gs://chimera-sobel-imagenes --role=roles/storage.objectUser \
+#     --member=principal://iam.googleapis.com/projects/914104353770/locations/global/workloadIdentityPools/tp3distribuidos.svc.id.goog/subject/ns/chimera-sobel/sa/sobel-almacen
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: chimera-sobel
 resources:
   - ../k8s
-images:
-  - {name: ghcr.io/chimera-sdypp/sobel-backend, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-frontend, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-split, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-worker, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-joiner, newTag: sha-7d4d1cd}
-  - {name: ghcr.io/chimera-sdypp/sobel-reasignador, newTag: sha-7d4d1cd}
 patches:
+  # El bucket es el de Cloud Storage: ni el emulador ni su URL.
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata: {name: almacen, namespace: sobel}
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata: {name: almacen, namespace: sobel}
+  - target: {kind: ConfigMap, name: sobel-almacen}
+    patch: |-
+      - op: replace
+        path: /data
+        value: {SOBEL_ALMACEN_BUCKET: chimera-sobel-imagenes}
   - target: {kind: Namespace}
     patch: |-
       - op: replace

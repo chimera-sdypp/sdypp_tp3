@@ -20,6 +20,7 @@ from backend import auth, jobs, validacion
 from backend.config import Config
 from backend.errores import ErrorApi, respuesta_de_error, sobre
 from backend.rabbit import NoDisponible, Rabbit
+from comun import almacen as punteros
 from comun import colas, metricas, registro
 
 PEDIDOS = Counter("sobel_pedidos_total", "Pedidos HTTP al backend", ["ruta", "codigo"])
@@ -28,11 +29,12 @@ EN_COLA = Gauge("sobel_tareas_en_cola", "Mensajes en cada cola", ["cola"])
 CADA = 10  # segundos entre actualizaciones de sobel_tareas_en_cola (y latidos a RabbitMQ)
 
 
-def crear_app(config=None, redis=None, rabbit=None, mantener=True):
+def crear_app(config=None, redis=None, rabbit=None, mantener=True, almacen=None):
     config = config or Config.desde_entorno()
     log, _ = registro.configurar("backend")
     redis = redis or redis_py.Redis.from_url(config.redis_url, socket_timeout=5, socket_connect_timeout=2)
     rabbit = rabbit or Rabbit(config.rabbitmq_url, log=log)
+    almacen = almacen or punteros.desde_entorno()
     app = FastAPI(title="Sobel — backend", docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
 
     def identidad(request: Request):
@@ -66,11 +68,11 @@ def crear_app(config=None, redis=None, rabbit=None, mantener=True):
     def aceptar(ident, operaciones, contenidos, nombres):
         validacion.imagenes(contenidos, nombres)
         validacion.pasos(operaciones, config.imagenes_permitidas, jobs.ofertas(redis))
-        job_id, creado = jobs.crear(redis, config.ttl, ident.usuario, operaciones, contenidos)
+        job_id, creado = jobs.crear(redis, almacen, config.ttl, ident.usuario, operaciones, contenidos)
         try:
             rabbit.publicar(colas.SPLIT, {"job_id": job_id})
         except NoDisponible:
-            jobs.borrar(redis, job_id, ident.usuario, len(contenidos))
+            jobs.borrar(redis, almacen, job_id, ident.usuario, len(contenidos))
             raise
         log.info("job %s de %s: %d archivos, %s", job_id, ident.usuario, len(contenidos),
                  " → ".join(p["operacion"] for p in operaciones))
@@ -98,7 +100,7 @@ def crear_app(config=None, redis=None, rabbit=None, mantener=True):
         if job["estado"] != "done":
             porcentaje = jobs.vista(redis, job_id, job)["fragmentos"]["porcentaje"]
             raise ErrorApi("JOB_NO_TERMINADO", f"el job está en {job['estado']} ({porcentaje} %)")
-        datos = redis.get(f"job:{job_id}:resultado:{n}")
+        datos = punteros.leer(redis, almacen, f"job:{job_id}:resultado:{n}")
         if datos is None:
             raise ErrorApi("JOB_INEXISTENTE", f"el resultado {n} del job {job_id} ya no está")
         return Response(datos, media_type="image/png")
@@ -128,12 +130,12 @@ def crear_app(config=None, redis=None, rabbit=None, mantener=True):
     @app.get("/health")
     def health():
         estados = {"backend": "ok", "redis": _estado(lambda: redis.ping()),
-                   "rabbitmq": "ok" if rabbit.vivo() else "caido"}
+                   "rabbitmq": "ok" if rabbit.vivo() else "caido", "almacen": _estado(almacen.vivo)}
         with ThreadPoolExecutor(max_workers=max(len(config.servicios), 1)) as hilos:
             for nombre, valor in zip(config.servicios, hilos.map(_consultar, config.servicios.values())):
                 estados[nombre] = valor
         estados["workers"] = _estado(lambda: jobs.workers(redis) or None)
-        codigo = 200 if estados["redis"] == estados["rabbitmq"] == "ok" else 503
+        codigo = 200 if estados["redis"] == estados["rabbitmq"] == estados["almacen"] == "ok" else 503
         return sobre(codigo, estados)
 
     @app.get("/metrics")
@@ -171,6 +173,7 @@ def crear_app(config=None, redis=None, rabbit=None, mantener=True):
         return await error_api(request, ErrorApi("RUTA_INEXISTENTE", f"no existe la ruta {request.url.path}"))
 
     @app.exception_handler(NoDisponible)
+    @app.exception_handler(punteros.NoDisponible)
     @app.exception_handler(redis_py.exceptions.ConnectionError)
     @app.exception_handler(redis_py.exceptions.TimeoutError)
     async def no_disponible(request, error):
