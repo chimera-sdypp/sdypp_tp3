@@ -5,12 +5,18 @@ Las de píxeles (`entrada`, `fragmento` y `resultado`) guardan el puntero al obj
 se escriben con `comun.almacen`."""
 
 TERMINADOS = "terminados"
+CONFIG_DINAMICA = "config:dinamica"
 
 TTL_POR_DEFECTO = 86400  # SOBEL_TTL: las claves de un job viven 24 h
 
 
 def job(job_id):
     return f"job:{job_id}"
+
+
+def reserva(job_id):
+    """Job reservado con `POST /jobs/presigned`: espera que el cliente suba las imágenes directo al bucket."""
+    return f"job:{job_id}:reserva"
 
 
 def entrada(job_id, archivo):

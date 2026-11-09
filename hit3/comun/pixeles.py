@@ -82,7 +82,9 @@ def unir(franjas, geometria):
     return np.vstack([franja[extra:extra + filas] for franja, (extra, filas) in zip(franjas, geometria, strict=True)])
 
 
-def a_png(matriz):
+def a_png(matriz, nivel=1):
+    """PNG sin pérdida. `nivel` (0-9) cambia CPU por tamaño: el 6 de Pillow tarda varias veces más que el 1 en una
+    imagen de 100 MB, y estos PNG son intermedios (viven minutos en el bucket). Es la perilla `png_nivel`."""
     salida = io.BytesIO()
-    Image.fromarray(matriz).save(salida, format="PNG")
+    Image.fromarray(matriz).save(salida, format="PNG", compress_level=int(nivel))
     return salida.getvalue()

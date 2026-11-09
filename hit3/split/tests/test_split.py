@@ -389,37 +389,57 @@ def test_un_job_que_va_a_la_dlq_cuenta_como_error(redis):
     assert diferencia(antes) == [0, 1, 0, 0]
 
 
-def test_calcular_partes_dinamicas_imagen_chica(redis):
-    # Imagen chica (< 0.5 MB): 1 o 2 partes
-    chica = np.zeros((100, 100, 3), dtype=np.uint8)
-    assert split.calcular_partes(chica, redis) == 1
-
-    algo_mayor = np.zeros((200, 200, 3), dtype=np.uint8)
-    assert split.calcular_partes(algo_mayor, redis) == 2
+def megas(mb, ancho=1000):
+    """Una matriz RGB de `mb` MiB de píxeles (alto variable, `ancho` fijo)."""
+    return np.zeros((mb * 1024 * 1024 // (ancho * 3), ancho, 3), dtype=np.uint8)
 
 
-def test_calcular_partes_dinamicas_segun_workers_y_dimensiones(redis):
-    # Sin workers activos en Redis: fallback a 2
-    mediana = np.zeros((1200, 1200, 3), dtype=np.uint8)  # ~4.1 MB
-    assert split.calcular_partes(mediana, redis) == 2
+def test_calcular_partes_una_imagen_chica_va_en_un_solo_fragmento(redis):
+    assert split.calcular_partes(np.zeros((100, 100, 3), dtype=np.uint8), redis) == 1
+    assert split.calcular_partes(megas(5), redis) == 1  # hasta 8 MB por fragmento
 
-    # Con 4 workers activos en Redis
-    for i in range(4):
+
+@pytest.mark.parametrize("mb, partes", [(9, 2), (40, 5), (100, 13)])
+def test_calcular_partes_reparte_segun_el_tamano(redis, mb, partes):
+    assert split.calcular_partes(megas(mb), redis) == partes
+
+
+def test_calcular_partes_no_depende_de_cuantos_workers_haya(redis):
+    sin_workers = split.calcular_partes(megas(40), redis)
+    for i in range(6):
         redis.hset(f"worker:w{i}", "host", f"w{i}")
-    assert split.calcular_partes(mediana, redis) == 4
+    assert split.calcular_partes(megas(40), redis) == sin_workers
 
 
-def test_calcular_partes_dinamicas_imagen_gigante(redis):
-    # Imagen grande/gigante (> 40 MB)
-    gigante = np.zeros((5000, 3000, 3), dtype=np.uint8)  # ~43 MB
-    partes = split.calcular_partes(gigante, redis)
-    assert 16 <= partes <= 32
+def test_calcular_partes_no_corta_franjas_de_menos_de_64_filas(redis):
+    ancha = np.zeros((200, 100_000, 3), dtype=np.uint8)  # 57 MB (8 partes por tamaño) en sólo 200 filas
+    assert split.calcular_partes(ancha, redis) == 200 // split.FILAS_MIN
 
 
 def test_calcular_partes_fijas_override(redis):
-    matriz = np.zeros((5000, 3000, 3), dtype=np.uint8)
-    assert split.calcular_partes(matriz, redis, partes_fijas=4) == 4
+    assert split.calcular_partes(megas(40), redis, partes_fijas=4) == 4
 
+
+class CanalConCola:
+    def __init__(self, mensajes):
+        self.mensajes = mensajes
+
+    def queue_declare(self, queue, passive=False):
+        return type("Declarada", (), {"method": type("M", (), {"message_count": self.mensajes})()})()
+
+
+def test_calcular_partes_con_la_cola_saturada_corta_la_mitad(redis):
+    assert split.calcular_partes(megas(100), redis, canal=CanalConCola(50), cola_tareas="c") == 13
+    assert split.calcular_partes(megas(100), redis, canal=CanalConCola(51), cola_tareas="c") == 7
+
+
+def test_calcular_partes_usa_la_configuracion_dinamica_al_momento(redis):
+    from comun import dinamico
+    dinamico.actualizar(redis, {"mb_por_fragmento": 25, "max_partes": 3})
+    assert split.calcular_partes(megas(40), redis) == 2
+    assert split.calcular_partes(megas(100), redis) == 3  # 4 por tamaño, tope 3
+    dinamico.actualizar(redis, {"mb_por_fragmento": None, "max_partes": None})
+    assert split.calcular_partes(megas(40), redis) == 5
 
 
 class CanalDeRabbit(CanalQuePublica):

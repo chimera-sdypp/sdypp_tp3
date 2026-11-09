@@ -21,7 +21,7 @@ from backend.config import Config
 from backend.errores import ErrorApi, respuesta_de_error, sobre
 from backend.rabbit import NoDisponible, Rabbit
 from comun import almacen as punteros
-from comun import colas, metricas, registro
+from comun import claves, colas, dinamico, metricas, registro
 
 PEDIDOS = Counter("sobel_pedidos_total", "Pedidos HTTP al backend", ["ruta", "codigo"])
 ERRORES = metricas.ERRORES  # el común: registrarlo dos veces en el proceso no arranca
@@ -47,6 +47,22 @@ def crear_app(config=None, redis=None, rabbit=None, mantener=True, almacen=None)
         if job is None or (job["usuario"] != ident.usuario and not ident.es_admin):
             raise ErrorApi("JOB_INEXISTENTE", f"no existe el job {job_id}")
         return job
+
+    async def json_del_cuerpo(request: Request):
+        tipo = request.headers.get("content-type", "")
+        if not tipo.startswith("application/json"):
+            raise ErrorApi("TIPO_DE_CONTENIDO", f"el cuerpo tiene que ser application/json (llegó: {tipo or 'nada'})")
+        try:
+            return await request.json()
+        except ValueError:
+            raise ErrorApi("CUERPO_INVALIDO", "el cuerpo no es JSON válido") from None
+
+    def aceptado(job_id, archivos, creado, operaciones, usuario):
+        log.info("job %s de %s: %d archivos, %s", job_id, usuario, archivos,
+                 " → ".join(p["operacion"] for p in operaciones))
+        return sobre(202, {"job_id": job_id, "estado": "queued", "url": f"/jobs/{job_id}",
+                           "archivos": archivos, "creado": jobs.iso(creado)},
+                     {"Location": f"/jobs/{job_id}"})
 
     @app.post("/jobs")
     async def crear_job(request: Request, ident=Depends(identidad)):
@@ -74,11 +90,47 @@ def crear_app(config=None, redis=None, rabbit=None, mantener=True, almacen=None)
         except NoDisponible:
             jobs.borrar(redis, almacen, job_id, ident.usuario, len(contenidos))
             raise
-        log.info("job %s de %s: %d archivos, %s", job_id, ident.usuario, len(contenidos),
-                 " → ".join(p["operacion"] for p in operaciones))
-        return sobre(202, {"job_id": job_id, "estado": "queued", "url": f"/jobs/{job_id}",
-                           "archivos": len(contenidos), "creado": jobs.iso(creado)},
-                     {"Location": f"/jobs/{job_id}"})
+        return aceptado(job_id, len(contenidos), creado, operaciones, ident.usuario)
+
+    # Subida directa al bucket (contrato §2b): el backend valida y reparte URLs, los bytes no pasan por él.
+    @app.post("/jobs/presigned")
+    async def reservar(request: Request, ident=Depends(identidad)):
+        tamanos, operaciones = validacion.reserva(await json_del_cuerpo(request))
+        return await run_in_threadpool(abrir_subidas, ident, tamanos, operaciones)
+
+    def abrir_subidas(ident, tamanos, operaciones):
+        validacion.pasos(operaciones, config.imagenes_permitidas, jobs.ofertas(redis))
+        hilos = dinamico.leer(redis)["hilos_almacen"]
+        job_id, urls = jobs.reservar(redis, almacen, ident.usuario, operaciones, tamanos, hilos)
+        log.info("job %s de %s: reservado, %d archivos (%d bytes) para subir directo al bucket", job_id,
+                 ident.usuario, len(tamanos), sum(tamanos))
+        return sobre(200, {
+            "job_id": job_id,
+            "subidas": [{"archivo": a, "bytes": t, "metodo": "PUT", "url": u}
+                        for a, (t, u) in enumerate(zip(tamanos, urls, strict=True))],
+            "confirmar": f"/jobs/{job_id}/confirmar",
+            "vence": jobs.iso(jobs.ahora_ms() + jobs.RESERVA_S * 1000),
+        })
+
+    @app.post("/jobs/{job_id}/confirmar")
+    def confirmar(job_id: str, ident=Depends(identidad)):
+        reserva = jobs.leer_reserva(redis, job_id)
+        if reserva is None or reserva["usuario"] != ident.usuario:
+            raise ErrorApi("JOB_INEXISTENTE", f"no hay una subida pendiente del job {job_id} (venció o ya se confirmó)")
+        nombres = [punteros.nombre_de(claves.entrada(job_id, a)) for a in range(len(reserva["tamanos"]))]
+        with ThreadPoolExecutor(max_workers=min(dinamico.leer(redis)["hilos_almacen"], len(nombres))) as hilos:
+            encontrados = list(hilos.map(almacen.inicio, nombres))
+        validacion.subidos(reserva["tamanos"], encontrados)
+        validacion.pasos(reserva["operaciones"], config.imagenes_permitidas, jobs.ofertas(redis))
+        creado = jobs.confirmar(redis, job_id, config.ttl, reserva)
+        if creado is None:  # otra confirmación del mismo job llegó primero
+            raise ErrorApi("JOB_INEXISTENTE", f"no hay una subida pendiente del job {job_id} (venció o ya se confirmó)")
+        try:
+            rabbit.publicar(colas.SPLIT, {"job_id": job_id})
+        except NoDisponible:
+            jobs.devolver_reserva(redis, job_id, reserva)
+            raise
+        return aceptado(job_id, len(nombres), creado, reserva["operaciones"], ident.usuario)
 
     @app.get("/jobs")
     def listar_jobs(estado: str | None = None, usuario: str | None = None, ident=Depends(identidad)):
@@ -104,6 +156,26 @@ def crear_app(config=None, redis=None, rabbit=None, mantener=True, almacen=None)
         if datos is None:
             raise ErrorApi("JOB_INEXISTENTE", f"el resultado {n} del job {job_id} ya no está")
         return Response(datos, media_type="image/png")
+
+    @app.get("/admin/config")
+    def ver_config(ident=Depends(identidad)):
+        auth.exigir_admin(ident, "/admin/config")
+        return sobre(200, {
+            "config": dinamico.leer(redis),
+            "personalizadas": dinamico.personalizadas(redis),
+            "perillas": {nombre: {"por_defecto": defecto, "minimo": minimo, "maximo": maximo, "para_que": texto}
+                         for nombre, (defecto, minimo, maximo, texto) in dinamico.ESQUEMA.items()},
+        })
+
+    @app.put("/admin/config")
+    async def cambiar_config(request: Request, ident=Depends(identidad)):
+        auth.exigir_admin(ident, "/admin/config")
+        cambios, detalles = dinamico.validar(await json_del_cuerpo(request))
+        if detalles:
+            raise ErrorApi("PAYLOAD_INVALIDO", "la configuración no es válida", detalles)
+        nueva = await run_in_threadpool(dinamico.actualizar, redis, cambios)
+        log.info("%s cambió la configuración dinámica: %s", ident.usuario, cambios)
+        return sobre(200, {"config": nueva, "personalizadas": dinamico.personalizadas(redis)})
 
     @app.get("/stats")
     def stats(ident=Depends(identidad)):

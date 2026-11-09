@@ -36,10 +36,12 @@ RabbitMQ, así que da lo mismo qué réplica del backend atienda.
 | Ruta | Sin token | `usuario` | `admin` |
 |---|---|---|---|
 | `POST /jobs` | 401 | crea | crea |
+| `POST /jobs/presigned` y `POST /jobs/{id}/confirmar` (§2b) | 401 | reserva y confirma los suyos | igual: la reserva de otro, **404** |
 | `GET /jobs` | 401 | los suyos | todos (o `?usuario=`) |
 | `GET /jobs/{id}` y `GET /jobs/{id}/resultado/{n}` | 401 | el suyo; de otro, **404** | cualquiera |
 | `GET /stats` | 401 | 403 | 200 |
 | `POST /admin/dlq/reprocesar` | 401 | 403 | 200 |
+| `GET` y `PUT /admin/config` | 401 | 403 | 200 |
 | `GET /health` | 200 (pública) | 200 | 200 |
 
 Un job de otro usuario da `404`, no `403`: así no se puede averiguar qué `job_id` existen.
@@ -73,6 +75,56 @@ Respuesta inmediata, `202` con `Location: /jobs/<id>`. Todas las respuestas usan
 {"codigo": 202, "contenido": {"job_id": "3f6c2a9e-…", "estado": "queued", "url": "/jobs/3f6c2a9e-…",
   "archivos": 2, "creado": "2026-10-21T14:03:11Z"}}
 ```
+
+## 2b. Envío con subida directa al bucket
+
+Lo mismo que `POST /jobs`, pero los bytes no pasan por el backend: el cliente los sube directo al bucket. Con
+imágenes grandes el `POST` multipart tarda lo que tarda subir 100 MB al backend y del backend al bucket (12,7 s de p95
+en GKE); así el backend sólo valida y reparte URLs, y la subida va una sola vez, del cliente al bucket. El frontend
+sigue usando `POST /jobs`.
+
+**1. Reservar:** `POST /jobs/presigned`, `application/json`, con el tamaño de cada archivo en vez del archivo:
+
+```json
+{"archivos": [104857600, 5242880],
+ "operaciones": [{"operacion": "sobel", "imagen": "ghcr.io/chimera-sdypp/sobel-worker:1.1.2"}]}
+```
+
+Se valida todo lo que se puede sin los bytes, con los mismos errores que `POST /jobs`: de 1 a 50 archivos, hasta
+100 MiB cada uno y 200 MiB en total (`413` **antes** de subir nada), y las operaciones (imagen permitida, workers
+que la ofrezcan). Respuesta `200`:
+
+```json
+{"codigo": 200, "contenido": {"job_id": "3f6c2a9e-…",
+  "subidas": [{"archivo": 0, "bytes": 104857600, "metodo": "PUT", "url": "https://storage.googleapis.com/upload/…"},
+              {"archivo": 1, "bytes": 5242880, "metodo": "PUT", "url": "https://storage.googleapis.com/upload/…"}],
+  "confirmar": "/jobs/3f6c2a9e-…/confirmar", "vence": "2026-11-09T14:18:11Z"}}
+```
+
+**2. Subir** cada archivo con un `PUT` a su `url`, sin `Authorization`: `curl -X PUT --data-binary @gato.png <url>`.
+
+**3. Confirmar:** `POST /jobs/{id}/confirmar`, sin cuerpo. El backend lee del bucket sólo el comienzo de cada archivo
+(64 KiB): que esté, que pese lo declarado, que sea PNG o JPEG y que no pase de 100 megapíxeles. Si está todo, crea el
+job, lo encola y contesta `202` igual que `POST /jobs`; desde ahí es un job como cualquier otro (`GET /jobs/{id}`).
+Si falta un archivo o no pesa lo declarado, `422 ARCHIVO_INVALIDO` con el detalle, y la reserva sigue: se sube lo que
+falta y se vuelve a confirmar. Un archivo **corrupto** más allá del encabezado no se ve acá sino en el split, y el job
+termina `failed` con `ARCHIVO_INVALIDO` (§3): verificarlo entero obligaría al backend a bajar los bytes que justamente
+dejaron de pasar por él. `tiempos_s.total` empieza a contar al confirmar: la subida es tiempo del cliente.
+
+**Qué tan segura es la URL.** Es la de una **sesión de subida resumable** de Cloud Storage que abre el backend con su
+propia identidad (Workload Identity). Quien la tiene puede subir, sin credenciales, pero sólo:
+
+- **ese objeto**, con el nombre que eligió el backend (`job/<id>/entrada/<a>.png`): no puede escribir otro ni leer nada;
+- **los bytes declarados:** la sesión se abre con `X-Upload-Content-Length`, y al confirmar el backend revisa que el
+  objeto pese eso; si no, el job no se crea;
+- **mientras la reserva esté vigente:** la reserva vence a los 15 min y después no hay qué confirmar. GCS deja la URL
+  viva una semana, pero lo que se suba tarde no entra a ningún job y lo borra la regla de vencimiento del bucket (1 día).
+
+No es una URL firmada V4: firmar necesita una cuenta de servicio de Google con clave (que habría que guardar como
+secreto) o el permiso `iam.serviceAccounts.signBlob`, y los pods entran por Workload Identity sin ninguna de las dos.
+Según la documentación de Cloud Storage, la URL de la sesión "actúa como token de autenticación": es el mecanismo
+pensado para que suba alguien que no tiene credenciales. El token JWT se sigue pidiendo en la reserva y en la confirmación: sólo quien
+reservó confirma.
 
 ## 3. Consulta: `GET /jobs/{id}`
 
@@ -145,6 +197,26 @@ en un caso raro: si otra copia de la tarea agotada, de una reentrega, terminó b
   reprocesado cuenta una vez por cada terminación).
 - `tasa_error` es la proporción de `failed` + `dlq` entre esas mismas terminaciones.
 
+**`GET /admin/config`** y **`PUT /admin/config`**: la configuración dinámica, perillas de rendimiento que se
+cambian **en caliente**, sin redesplegar. Viven en el hash `config:dinamica` de Redis y cada servicio las lee al
+usarlas (el split por job, el worker y el joiner por fragmento): valen desde el próximo job en todos los pods.
+
+| Perilla | Por defecto | Rango | Qué cambia |
+|---|---|---|---|
+| `mb_por_fragmento` | 8 | 1–100 | El split parte cada imagen **según su tamaño**: una franja cada tantos MB de píxeles RGB (una de 100 MB, en 13). Una imagen chica va en un solo fragmento |
+| `max_partes` | 32 | 1–64 | Tope de fragmentos por imagen |
+| `umbral_cola` | 50 | 0–100000 | Si la cola de tareas pasa estos mensajes, el split corta en la mitad de fragmentos: los workers ya están ocupados y más fragmentos sólo suman viajes al bucket |
+| `png_nivel` | 1 | 0–9 | Compresión de los PNG intermedios (fragmentos y resultado). 1 codifica más rápido que el 6 de Pillow, con objetos algo más grandes |
+| `hilos_almacen` | 8 | 1–32 | Subidas y bajadas en paralelo contra el bucket por imagen |
+
+`PUT` recibe sólo las que cambian (`{"mb_por_fragmento": 16}`); `null` vuelve una al valor por defecto. Un valor
+fuera de rango o una perilla que no existe es `422 PAYLOAD_INVALIDO` y no cambia nada. Las dos devuelven
+`{"config": <lo que vale ahora>, "personalizadas": <lo que se pisó>}`; el `GET` agrega `perillas` con el rango y la
+descripción de cada una. El valor por defecto se puede cambiar por entorno con `SOBEL_<PERILLA>` (`SOBEL_MAX_PARTES`).
+
+El split no mira cuántos workers hay: con un tamaño de fragmento fijo, la cola de tareas crece con los bytes
+pendientes y no con los pods, y es esa cola la que dice cuándo hacen falta más workers.
+
 **`POST /admin/dlq/reprocesar`** vuelve a encolar todo lo que está en `sobel.dlq.agotados`, con `intento` en 1, y
 pasa esos jobs a `processing`: `{"reprocesados": 3, "jobs": ["3f6c2a9e-…"]}`.
 
@@ -181,9 +253,9 @@ personas. `detalles` es una lista: vacía, salvo en `PAYLOAD_INVALIDO` y `ARCHIV
 | 405 | `METODO_NO_PERMITIDO` | La ruta existe pero no acepta ese método. Trae `Allow` | `"DELETE no está permitido en /jobs/{id}"` |
 | 409 | `JOB_NO_TERMINADO` | Se pidió un resultado de un job que no está `done` | `"el job está en processing (62.5 %)"` |
 | **413** | `ARCHIVO_DEMASIADO_GRANDE` | Un archivo pasa de 100 MiB o de 100 megapíxeles, o el pedido pasa de 200 MiB | `"el archivo 2 (perro.jpg) supera los 104857600 bytes"` |
-| 415 | `TIPO_DE_CONTENIDO` | `POST /jobs` sin `multipart/form-data` | `"el cuerpo tiene que ser multipart/form-data (llegó: application/json)"` |
+| 415 | `TIPO_DE_CONTENIDO` | `POST /jobs` sin `multipart/form-data`, o `POST /jobs/presigned` o `PUT /admin/config` sin `application/json` | `"el cuerpo tiene que ser multipart/form-data (llegó: application/json)"` |
 | 422 | `PAYLOAD_INVALIDO` | Falta un campo, `operaciones` no es JSON válido, hay 0 o más de 3 pasos, o 0 o más de 50 archivos | `"el pedido no es válido"` + `detalles: [{"campo": "operaciones", "problema": "tiene entre 1 y 3 pasos, llegaron 4"}]` |
-| 422 | `ARCHIVO_INVALIDO` | Un archivo no es PNG ni JPEG, o está corrupto | `"hay archivos que no son imágenes válidas"` + `detalles: [{"campo": "archivos[1]", "problema": "no es PNG ni JPEG"}]` |
+| 422 | `ARCHIVO_INVALIDO` | Un archivo no es PNG ni JPEG, o está corrupto. Al confirmar una subida directa (§2b): además, no está en el bucket o no pesa lo declarado | `"hay archivos que no son imágenes válidas"` + `detalles: [{"campo": "archivos[1]", "problema": "no es PNG ni JPEG"}]` |
 | 422 | `OPERACION_NO_SOPORTADA` | La imagen de ese paso no ofrece esa operación | `"la imagen … no ofrece la operación 'rotar' (ofrece: sobel, grises, blur)"` |
 | **429** | `DEMASIADOS_PEDIDOS` | Más de 120 pedidos por minuto del mismo usuario. Trae `Retry-After` | `"más de 120 pedidos por minuto: reintentá en 14 s"` |
 | **500** | `ERROR_INTERNO` | Error inesperado. El detalle va al log, nunca al cliente | `"error interno del servidor"` |
@@ -339,6 +411,8 @@ escriben a mano.
 | `terminados` | list | joiner, split, reasignador → backend | `"<estado> <ms totales>"` de las últimas 1000 terminaciones de jobs (`LPUSH` + `LTRIM`), para `/stats`. Un job reprocesado (§3) puede tener más de una |
 | `worker:<id>` | hash, vence a los 15 s | worker → backend, frontend | `<id>` es el hostname (pod o VM). `imagen`, `operaciones` (separadas por coma), `host`. El worker lo renueva cada 5 s |
 | `limite:<usuario>:<minuto>` | string, vence a los 60 s | backend | Contador del límite de pedidos |
+| `job:<id>:reserva` | hash, vence a los 15 min | backend | Subida directa pendiente (§2b): `usuario`, `operaciones` (JSON) y `tamanos` (JSON). Al confirmar se borra y se crean el job y las entradas en la misma transacción, con `WATCH` sobre la reserva: dos confirmaciones a la vez crean un solo job |
+| `config:dinamica` | hash, no vence | backend → split, worker, joiner | Las perillas que se pisaron con `PUT /admin/config` (§4) |
 
 **Quién escribe qué en `job:<id>`:**
 

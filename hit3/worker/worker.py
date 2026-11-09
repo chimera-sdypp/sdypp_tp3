@@ -12,7 +12,7 @@ import threading
 import time
 
 from comun import almacen as punteros
-from comun import claves, colas, conexion, metricas, pixeles, registro, salud
+from comun import claves, colas, conexion, dinamico, metricas, pixeles, registro, salud
 from worker.operaciones import OPERACIONES
 
 VIGENCIA_DEL_ANUNCIO = 15  # s: si el worker deja de anunciarse, deja de contar como activo (contrato §10)
@@ -113,7 +113,8 @@ def manejador(redis, nombre, ofrecidas=tuple(OPERACIONES), funciones=OPERACIONES
             with tiempo_limite(timeout):
                 salida = funciones[operacion](entrada)
             proc_ms = ahora_ms() - inicio
-            punteros.escribir(redis, almacen, clave_salida, pixeles.a_png(salida), ttl)
+            nivel_png = dinamico.leer(redis)["png_nivel"]
+            punteros.escribir(redis, almacen, clave_salida, pixeles.a_png(salida, nivel=nivel_png), ttl)
             destino = mandar_adelante(canal, tarea, nombre, proc_ms, ahora_ms)
             log.info("job %s: archivo %d, fragmento %d, %s en %d ms → %s",
                      job_id, archivo, indice, operacion, proc_ms, destino)

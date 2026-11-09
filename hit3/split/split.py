@@ -5,13 +5,14 @@
 # -------------------------------------------------------------------------------------------------
 import json      # Para serializar y deserializar datos JSON (mensajes y datos en Redis)
 import logging   # Para emitir logs informativos, advertencias y errores en consola
+import math      # Para redondear hacia arriba la cantidad de fragmentos
 import signal    # Para interceptar señales del sistema operativo (como SIGTERM de Kubernetes)
 import sys       # Para operaciones del intérprete, como sys.exit para apagado limpio
 import time      # Para medir marcas de tiempo (timestamps) y calcular demoras en milisegundos
 
 # Módulos comunes del proyecto (carpeta hit3/comun/)
 from comun import almacen as punteros
-from comun import claves, colas, conexion, metricas, pixeles, registro, salud
+from comun import claves, colas, conexion, dinamico, metricas, pixeles, registro, salud
 
 
 # -------------------------------------------------------------------------------------------------
@@ -21,6 +22,9 @@ from comun import claves, colas, conexion, metricas, pixeles, registro, salud
 # Operaciones que analizan píxeles vecinos con una matriz de convolución 3x3.
 # Necesitan 1 fila extra de borde (halo) arriba y abajo para calcular los bordes correctamente.
 OPERACIONES_DE_VECINDAD = {"sobel", "blur"}
+
+# Una franja de menos filas que esto es casi todo halo y overhead: el split no corta más fino.
+FILAS_MIN = 64
 
 
 def ahora_en_ms():
@@ -80,70 +84,36 @@ def pasar_a_processing(redis, job_id, t_split_ms):
 # -------------------------------------------------------------------------------------------------
 # 4. CÁLCULO DINÁMICO DE PARTES (Mejora solicitada en devolución)
 # -------------------------------------------------------------------------------------------------
-def calcular_partes(matriz, redis, archivos=1, canal=None, cola_tareas=None, partes_fijas=0):
-    """Calcula dinámicamente en cuántas partes horizontales cortar la imagen.
-    
-    Evalúa 4 variables en simultáneo:
-    1. Dimensiones y peso en memoria RAM de la imagen (matriz NumPy).
-    2. Workers activos actualmente en el clúster (registrados en Redis bajo 'worker:*').
-    3. Cantidad de archivos en el pedido (para evitar avalanchas de fragmentos).
-    4. Mensajes acumulados en RabbitMQ (si la cola ya está saturada, no sobre-fracciona).
+def calcular_partes(matriz, redis, canal=None, cola_tareas=None, partes_fijas=0):
+    """En cuántas franjas horizontales cortar una imagen: según su TAMAÑO, no según cuántos workers haya.
 
-    Si 'partes_fijas' es > 0, respeta ese valor fijo (útil para tests unitarios).
+    1. Tamaño: una franja cada `mb_por_fragmento` MB de píxeles. Una imagen chica sale en un solo fragmento (partirla
+       sólo suma viajes al bucket y mensajes); una de 100 MB, en ~13 de 8 MB.
+    2. Cola: si la cola de tareas ya pasa `umbral_cola` mensajes, los workers no dan abasto y más fragmentos sólo
+       suman overhead: se corta en la mitad (franjas del doble de tamaño).
+    3. Topes: `max_partes` por imagen, y ninguna franja de menos de FILAS_MIN filas.
+
+    No mira los workers activos: con un tamaño de fragmento fijo, la cola crece con el trabajo pendiente (bytes) y
+    no con cuántos pods hay, y es esa cola la que dice cuándo hacen falta más workers. Las tres perillas se cambian
+    en caliente con PUT /admin/config (comun/dinamico.py). `partes_fijas` > 0 (SOBEL_PARTES) pisa todo.
     """
-    # Si viene un override fijo explícito (ej: pruebas unitarias con partes=2), lo respetamos
     if partes_fijas and partes_fijas > 0:
         return partes_fijas
 
-    alto, ancho = matriz.shape[:2]
+    cfg = dinamico.leer(redis)
+    alto = matriz.shape[0]
     tamano_mb = matriz.nbytes / (1024 * 1024)
+    partes = math.ceil(tamano_mb / cfg["mb_por_fragmento"])
 
-    # 1. Averiguar cuántos workers vivos tenemos en Redis
-    try:
-        workers_activos = len(list(redis.scan_iter(match="worker:*", count=100)))
-    except Exception:
-        workers_activos = 2  # Valor de respaldo seguro
-    workers_activos = max(workers_activos, 1)
-
-    # 2. Averiguar si la cola de RabbitMQ tiene mensajes en espera
-    mensajes_en_cola = 0
-    if canal is not None and cola_tareas is not None:
-        try:
-            # Declaración pasiva: solo consulta el estado de la cola sin modificarla
-            estado_cola = canal.queue_declare(queue=cola_tareas, passive=True)
-            mensajes_en_cola = getattr(estado_cola.method, "message_count", 0)
+    if canal is not None and cola_tareas is not None and partes > 1:
+        try:  # declaración pasiva: sólo consulta cuántos mensajes hay, sin modificar la cola
+            en_cola = canal.queue_declare(queue=cola_tareas, passive=True).method.message_count
         except Exception:
-            mensajes_en_cola = 0
+            en_cola = 0
+        if en_cola > cfg["umbral_cola"]:
+            partes = math.ceil(partes / 2)
 
-    # 3. Lógica de corte adaptativo:
-    # CASO A: Imagen pequeña (< 0.5 MB o menos de 300 filas de alto)
-    # No vale la pena fraccionar mucho: 1 o 2 partes evitan overhead de red y mensajes.
-    if tamano_mb < 0.5 or alto < 300:
-        return 1 if alto < 150 else 2
-
-    # CASO B: Imagen estándar / mediana (0.5 MB a 8 MB)
-    # Se ajusta proporcionalmente a los workers vivos (ej. 4 a 8 partes).
-    if tamano_mb < 8.0:
-        base = max(workers_activos, 2)
-        if mensajes_en_cola > 30:  # Si la cola está llena, limita el corte a 4
-            return min(base, 4)
-        return min(base, 8)
-
-    # CASO C: Imagen grande (8 MB a 40 MB)
-    # Busca que ninguna franja supere los 300 píxeles de alto para no sobrecargar CPU/RAM.
-    if tamano_mb < 40.0:
-        partes_por_alto = max(alto // 300, 4)
-        base = max(workers_activos * 2, partes_por_alto)
-        if mensajes_en_cola > 50:
-            return min(base, 8)
-        return min(base, 16)
-
-    # CASO D: Imagen gigante (40 MB a 100 MB)
-    # ¡Objetivo crítico!: Evitar OOMKilled en los workers generando franjas delgadas (máx 32 partes).
-    partes_por_alto = max(alto // 250, 8)
-    factor_archivos = max(archivos, 1)
-    max_partes = max(32 // factor_archivos, 8)
-    return int(min(max(partes_por_alto, workers_activos * 2), max_partes))
+    return max(1, min(partes, cfg["max_partes"], alto // FILAS_MIN))
 
 
 # -------------------------------------------------------------------------------------------------
@@ -203,14 +173,15 @@ def manejador(redis, partes=0, ttl=claves.TTL_POR_DEFECTO, ahora_ms=ahora_en_ms,
                 return
 
             # 4. Calcular cantidad de partes de forma adaptativa
-            n_partes = calcular_partes(matriz, redis, archivos=archivos, canal=canal, cola_tareas=cola,
-                                       partes_fijas=partes)
+            n_partes = calcular_partes(matriz, redis, canal=canal, cola_tareas=cola, partes_fijas=partes)
                                        
             # 5. Cortar la matriz en franjas horizontales con sus filas de halo añadidas
             fragmentos = pixeles.dividir(matriz, n_partes, filas_de_borde)
-            
+            nivel_png = dinamico.leer(redis)["png_nivel"]
+
             # 6. Subir cada franja al bucket como PNG (en paralelo) y dejar su puntero en Redis con vencimiento (TTL)
-            punteros.escribir_varios(redis, almacen, [(claves.fragmento(job_id, archivo, f, 0), pixeles.a_png(franja))
+            punteros.escribir_varios(redis, almacen, [(claves.fragmento(job_id, archivo, f, 0),
+                                                       pixeles.a_png(franja, nivel=nivel_png))
                                                       for f, (franja, _, _) in enumerate(fragmentos)], ttl)
             for f in range(len(fragmentos)):
                 tareas.append({

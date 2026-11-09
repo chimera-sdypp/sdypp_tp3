@@ -9,6 +9,10 @@ metadata:
 data:
   SOBEL_ALMACEN_BUCKET: sobel-imagenes
   SOBEL_ALMACEN_URL: http://almacen:4443
+  # Cómo llega al emulador el cliente que sube directo al bucket (POST /jobs/presigned, contrato §2b): las URLs de
+  # subida apuntan acá. Con `kubectl -n sobel port-forward svc/almacen 4443` es localhost. En GKE no hace falta: las
+  # URLs son de storage.googleapis.com.
+  SOBEL_ALMACEN_URL_PUBLICA: http://localhost:4443
 ---
 # Los pods que leen o escriben píxeles usan esta cuenta. En GKE es la identidad con la que entran al bucket por
 # Workload Identity, sin claves (el permiso lo da hit3/k8s-gke/README.md); en el k3s no hace nada.

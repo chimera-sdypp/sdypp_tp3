@@ -42,7 +42,7 @@ metadata:
     app.kubernetes.io/component: image-splitter
     sobel/apps: "true"
 spec:
-  replicas: 1                     # Cantidad de copias del Split corriendo en paralelo
+  replicas: 2                     # Dos a la vez: partir una imagen de 100 MB tarda segundos y no depende de otro job
   selector:
     matchLabels:
       app.kubernetes.io/name: split
@@ -100,7 +100,9 @@ spec:
             - name: SOBEL_PUERTO
               value: "8080"
 
-            # SOBEL_PARTES: 0 = partes dinámicas según tamaño, workers vivos, archivos y cola; N > 0 las fija.
+            # SOBEL_PARTES: 0 = partes según el tamaño de cada imagen y la cola de tareas; N > 0 las fija.
+            # Las perillas del reparto (mb_por_fragmento, max_partes, umbral_cola) se cambian en caliente con
+            # PUT /admin/config, sin redesplegar (contrato §4).
             - name: SOBEL_PARTES
               value: "0"
 

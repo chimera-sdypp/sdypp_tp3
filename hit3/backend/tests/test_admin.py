@@ -103,3 +103,31 @@ def test_metricas(cliente):
     texto = cliente.get("/metrics").text
     assert 'sobel_pedidos_total{codigo="200",ruta="/jobs"}' in texto
     assert 'sobel_errores_total{servicio="backend",tipo="NO_AUTORIZADO"}' in texto
+
+
+def test_config_dinamica_es_solo_para_admin(cliente):
+    assert cliente.get("/admin/config", headers=token()).status_code == 403
+    assert cliente.put("/admin/config", json={"max_partes": 4}, headers=token()).status_code == 403
+
+
+def test_config_dinamica_se_lee_y_se_cambia_en_caliente(cliente, redis):
+    inicial = cliente.get("/admin/config", headers=ADMIN).json()["contenido"]
+    assert inicial["personalizadas"] == {} and inicial["config"]["mb_por_fragmento"] == 8
+    assert set(inicial["perillas"]) == set(inicial["config"])
+
+    cambiada = cliente.put("/admin/config", json={"mb_por_fragmento": 16, "png_nivel": 3}, headers=ADMIN)
+    assert cambiada.status_code == 200
+    assert cambiada.json()["contenido"]["personalizadas"] == {"mb_por_fragmento": 16, "png_nivel": 3}
+    assert redis.hgetall("config:dinamica") == {b"mb_por_fragmento": b"16", b"png_nivel": b"3"}
+
+    # null vuelve una perilla a su valor por defecto
+    vuelta = cliente.put("/admin/config", json={"mb_por_fragmento": None}, headers=ADMIN).json()["contenido"]
+    assert vuelta["config"]["mb_por_fragmento"] == 8 and vuelta["personalizadas"] == {"png_nivel": 3}
+
+
+def test_config_dinamica_invalida_es_422_y_no_cambia_nada(cliente, redis):
+    respuesta = cliente.put("/admin/config", json={"max_partes": 0, "inexistente": 1, "png_nivel": 2}, headers=ADMIN)
+    assert respuesta.status_code == 422
+    assert {d["campo"] for d in respuesta.json()["contenido"]["error"]["detalles"]} == {"max_partes", "inexistente"}
+    assert not redis.exists("config:dinamica")
+    assert cliente.put("/admin/config", content=b"x", headers=ADMIN).status_code == 415

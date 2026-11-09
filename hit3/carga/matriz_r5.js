@@ -43,6 +43,12 @@ const sloPostOk = new Rate('slo_post_ok');
 // Métrica de tendencia para registrar la duración completa de procesamiento distribuido (tiempos_s.total).
 const jobTotalDuration = new Trend('job_total_duration', true);
 
+// Con subida directa (PRESIGNED=true): lo que tarda el cliente en subir los archivos al bucket.
+const subidaBucketDuration = new Trend('subida_bucket_duration', true);
+
+// Desde que el cliente empieza a mandar hasta que ve el job en done, subida incluida (en los dos modos).
+const clienteTotalDuration = new Trend('cliente_total_duration', true);
+
 // Métrica de tasa para medir el cumplimiento del SLO 2 (proporción de jobs que completan en tiempo pactado).
 const sloTotalOk = new Rate('slo_total_ok');
 
@@ -88,6 +94,17 @@ const POLL_JOB = __ENV.POLL_JOB !== 'false';
 
 // Referencia de la imagen OCI del worker a utilizar en el pipeline (según Contrato Sección 4).
 const DEFAULT_IMAGE_REF = __ENV.WORKER_IMAGE || 'ghcr.io/chimera-sdypp/sobel-worker:1.1.2';
+
+// Subida directa al bucket (contrato §2b): con PRESIGNED=true el cliente reserva el job en POST /jobs/presigned,
+// sube cada archivo con un PUT a su URL (no pasa por el backend) y confirma en POST /jobs/{id}/confirmar.
+const PRESIGNED = __ENV.PRESIGNED === 'true' || __ENV.PRESIGNED === '1';
+
+function reservar(tamanos, operaciones, token, tags) {
+  return http.post(`${TARGET_URL}/jobs/presigned`, JSON.stringify({ archivos: tamanos, operaciones }), {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    tags,
+  });
+}
 
 
 // ==============================================================================
@@ -249,17 +266,24 @@ export default function () {
   // ----------------------------------------------------------------------------
   // Objetivo: Comprobar que el validador semántico devuelva HTTP 422 OPERACION_NO_SOPORTADA.
   if (rand >= 0.05 && rand < 0.09) {
-    const payload = {
-      operaciones: JSON.stringify([{ operacion: 'rotar_invalida', imagen: DEFAULT_IMAGE_REF }]),
-      archivos: http.file(imgBytes, 'test.png', 'image/png'),
-    };
-    const params = {
-      headers: {
-        Authorization: `Bearer ${token}`, // Autenticación válida
-      },
-      tags: { tipo: 'caso_op_invalida' },
-    };
-    const res = http.post(`${TARGET_URL}/jobs`, payload, params);
+    let res;
+    if (PRESIGNED) {
+      // Con subida directa la operación se valida al reservar: no se llega a subir nada.
+      res = reservar([imgBytes.byteLength], [{ operacion: 'rotar_invalida', imagen: DEFAULT_IMAGE_REF }], token,
+        { tipo: 'caso_op_invalida' });
+    } else {
+      const payload = {
+        operaciones: JSON.stringify([{ operacion: 'rotar_invalida', imagen: DEFAULT_IMAGE_REF }]),
+        archivos: http.file(imgBytes, 'test.png', 'image/png'),
+      };
+      const params = {
+        headers: {
+          Authorization: `Bearer ${token}`, // Autenticación válida
+        },
+        tags: { tipo: 'caso_op_invalida' },
+      };
+      res = http.post(`${TARGET_URL}/jobs`, payload, params);
+    }
     const is422 = res.status === 422;
     check(res, {
       'Operación inválida recibe 422': () => is422,
@@ -278,17 +302,33 @@ export default function () {
   // ----------------------------------------------------------------------------
   // Objetivo: Comprobar que la validación de cabeceras de imagen devuelva HTTP 422 ARCHIVO_INVALIDO.
   if (rand >= 0.09 && rand < 0.13) {
-    const payload = {
-      operaciones: construirOperaciones(VB, false),
-      archivos: http.file(imgCorrupta, 'corrupta.png', 'image/png'),
-    };
-    const params = {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      tags: { tipo: 'caso_archivo_corrupto' },
-    };
-    const res = http.post(`${TARGET_URL}/jobs`, payload, params);
+    let res;
+    if (PRESIGNED) {
+      // Con subida directa el backend ve el archivo recién al confirmar: mira su encabezado en el bucket.
+      const etiqueta = { tipo: 'caso_archivo_corrupto' };
+      const reserva = reservar([imgCorrupta.byteLength], JSON.parse(construirOperaciones(VB, false)), token, etiqueta);
+      if (reserva.status !== 200) {
+        sloErrors.add(1);
+        sleep(1);
+        return;
+      }
+      const contenido = reserva.json().contenido;
+      http.put(contenido.subidas[0].url, imgCorrupta, { tags: etiqueta });
+      res = http.post(`${TARGET_URL}${contenido.confirmar}`, null,
+        { headers: { Authorization: `Bearer ${token}` }, tags: etiqueta });
+    } else {
+      const payload = {
+        operaciones: construirOperaciones(VB, false),
+        archivos: http.file(imgCorrupta, 'corrupta.png', 'image/png'),
+      };
+      const params = {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        tags: { tipo: 'caso_archivo_corrupto' },
+      };
+      res = http.post(`${TARGET_URL}/jobs`, payload, params);
+    }
     const is422 = res.status === 422;
     check(res, {
       'Archivo corrupto recibe 422': () => is422,
@@ -306,12 +346,6 @@ export default function () {
   // Petición Válida según parámetros VA x VB x VC x V1 (Tráfico Nominal del SLO)
   // ============================================================================
 
-  // Cuerpo multipart con VA copias de la imagen V1 (1, 10 o 50 archivos) y las VB operaciones
-  if (pedidoValido === null) {
-    const archivos = Array.from({ length: VA }, (_, i) => [`imagen_${i}.png`, imgBytes]);
-    pedidoValido = multipart(construirOperaciones(VB, false), archivos);
-  }
-
   // Cabeceras HTTP: Portador de credencial JWT y etiqueta para métricas de k6
   const params = {
     headers: {
@@ -320,14 +354,55 @@ export default function () {
     tags: { name: 'POST_jobs' },
   };
 
-  // Medición de alta precisión de la latencia de aceptación del backend
+  let res;
+  let postDuration;
   const startTime = Date.now();
-  // Envío de la petición HTTP POST asíncrona hacia el endpoint de ingreso
-  const res = http.post(`${TARGET_URL}/jobs`, pedidoValido.cuerpo, {
-    headers: { ...params.headers, 'Content-Type': pedidoValido.tipo },
-    tags: params.tags,
-  });
-  const postDuration = Date.now() - startTime;
+
+  if (PRESIGNED) {
+    // 1. Reservar: un JSON con los tamaños; el backend valida y devuelve una URL de subida por archivo.
+    const t0 = Date.now();
+    const resReserva = reservar(Array(VA).fill(imgBytes.byteLength), JSON.parse(construirOperaciones(VB, false)),
+      token, { name: 'POST_jobs_presigned' });
+    const tReserva = Date.now() - t0;
+    if (resReserva.status !== 200) {
+      postJobsDuration.add(tReserva);
+      sloPostOk.add(false);
+      sloErrors.add(1);
+      sleep(1);
+      return;
+    }
+    const reserva = resReserva.json().contenido;
+    // 2. Subir los archivos en paralelo directo al bucket (PUT a cada URL, sin credenciales): no pasan por el backend.
+    const tSubida = Date.now();
+    const respuestasBucket = http.batch(reserva.subidas.map((s) => [
+      s.metodo, s.url, imgBytes, { tags: { name: 'PUT_bucket_directo' }, timeout: '180s' },
+    ]));
+    subidaBucketDuration.add(Date.now() - tSubida);
+    if (!respuestasBucket.every((r) => r.status === 200 || r.status === 201)) {
+      sloErrors.add(1);
+      sleep(1);
+      return;
+    }
+    // 3. Confirmar: el backend mira el encabezado de lo subido y encola el job.
+    const t1 = Date.now();
+    res = http.post(`${TARGET_URL}${reserva.confirmar}`, null, { headers: params.headers, tags: params.tags });
+    // SLO 1 mide lo que tarda el backend en contestar: la reserva más la confirmación. La subida va aparte
+    // (subida_bucket_duration) y entra en cliente_total_duration.
+    postDuration = tReserva + (Date.now() - t1);
+  } else {
+    // Cuerpo multipart con VA copias de la imagen V1 (1, 10 o 50 archivos) y las VB operaciones
+    if (pedidoValido === null) {
+      const archivos = Array.from({ length: VA }, (_, i) => [`imagen_${i}.png`, imgBytes]);
+      pedidoValido = multipart(construirOperaciones(VB, false), archivos);
+    }
+    // Medición de alta precisión de la latencia de aceptación del backend
+    const t0 = Date.now();
+    res = http.post(`${TARGET_URL}/jobs`, pedidoValido.cuerpo, {
+      headers: { ...params.headers, 'Content-Type': pedidoValido.tipo },
+      tags: params.tags,
+    });
+    postDuration = Date.now() - t0;
+  }
 
   // Registro del tiempo de respuesta en el histograma de latencia de k6
   postJobsDuration.add(postDuration);
@@ -398,6 +473,8 @@ export default function () {
           const e2eMs = e2eSeconds * 1000;
           // Registra la duración en el histograma de procesamiento total
           jobTotalDuration.add(e2eMs);
+          // Lo que esperó el cliente de punta a punta, subida incluida: compara multipart con subida directa.
+          clienteTotalDuration.add(Date.now() - startTime);
           // Evalúa si el tiempo total cumple el umbral estipulado por el SLO 2 (30s o 120s)
           sloTotalOk.add(e2eMs <= SLO_TOTAL_THRESHOLD_MS);
           // Confirma que no hubo error no provocado

@@ -8,7 +8,7 @@ import sys
 import time
 
 from comun import almacen as punteros
-from comun import claves, colas, conexion, metricas, pixeles, registro, salud
+from comun import claves, colas, conexion, dinamico, metricas, pixeles, registro, salud
 
 
 def ahora_en_ms():
@@ -63,7 +63,8 @@ def unir_si_corresponde(redis, almacen, job_id, archivo, ttl, ahora_ms):
         raise FragmentoFaltante(f"job {job_id}: al archivo {archivo} le faltan los fragmentos {faltantes} "
                                 f"del paso {pasos}")
     imagen = pixeles.unir([pixeles.leer(datos) for datos in pngs], geometria)
-    punteros.escribir(redis, almacen, claves.resultado(job_id, archivo), pixeles.a_png(imagen), ttl)
+    nivel_png = dinamico.leer(redis)["png_nivel"]
+    punteros.escribir(redis, almacen, claves.resultado(job_id, archivo), pixeles.a_png(imagen, nivel=nivel_png), ttl)
     t_join_ms = ahora_ms() - inicio
     with redis.pipeline() as transaccion:
         transaccion.hincrby(claves.job(job_id), "t_join_ms", t_join_ms)
