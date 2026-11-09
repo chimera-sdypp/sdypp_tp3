@@ -81,3 +81,6 @@ hit3/carga/datos/
 *.tfvars
 !*.tfvars.example
 crash.log
+
+# Credenciales locales (nunca al repo)
+Credenciales*.txt

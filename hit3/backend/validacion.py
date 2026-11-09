@@ -43,8 +43,9 @@ def campos(formulario):
 
 
 def _operaciones(texto):
+    """`texto` es el campo del multipart (JSON en un string) o, en POST /jobs/presigned, la lista ya decodificada."""
     try:
-        pasos = json.loads(texto)
+        pasos = json.loads(texto) if isinstance(texto, str) else texto
     except ValueError:
         return None, "no es JSON válido"
     if not isinstance(pasos, list) or not 1 <= len(pasos) <= PASOS_MAX:
@@ -55,6 +56,66 @@ def _operaciones(texto):
                 or not all(isinstance(valor, str) and valor for valor in paso.values())):
             return None, f'el paso {i} tiene que ser {{"operacion": "...", "imagen": "..."}}'
     return pasos, None
+
+
+def reserva(cuerpo):
+    """Revisa el JSON de POST /jobs/presigned (contrato §2b). Devuelve (tamaños, operaciones) o lanza 422 / 413.
+
+    `archivos` es la lista de tamaños en bytes: los límites del contrato se aplican antes de que se suba nada.
+    """
+    if not isinstance(cuerpo, dict):
+        raise ErrorApi("PAYLOAD_INVALIDO", "el pedido no es válido",
+                       [{"campo": "cuerpo", "problema": "tiene que ser un objeto JSON"}])
+    detalles = [{"campo": clave, "problema": "campo no permitido"} for clave in cuerpo if clave not in CAMPOS]
+    tamanos = cuerpo.get("archivos")
+    if not isinstance(tamanos, list) or not 1 <= len(tamanos) <= ARCHIVOS_MAX:
+        detalles.append({"campo": "archivos", "problema": f"tiene que ser una lista de 1 a {ARCHIVOS_MAX} tamaños "
+                                                          "en bytes, uno por archivo"})
+    elif not all(isinstance(t, int) and not isinstance(t, bool) and t > 0 for t in tamanos):
+        detalles.append({"campo": "archivos", "problema": "cada tamaño tiene que ser un entero mayor que 0"})
+    operaciones, problema = _operaciones(cuerpo.get("operaciones"))
+    if problema:
+        detalles.append({"campo": "operaciones", "problema": problema})
+    if detalles:
+        raise ErrorApi("PAYLOAD_INVALIDO", "el pedido no es válido", detalles)
+    for i, tamano in enumerate(tamanos):
+        if tamano > ARCHIVO_MAX:
+            raise ErrorApi("ARCHIVO_DEMASIADO_GRANDE", f"el archivo {i} ({tamano} bytes) supera los {ARCHIVO_MAX} bytes")
+    if sum(tamanos) > PEDIDO_MAX:
+        raise ErrorApi("ARCHIVO_DEMASIADO_GRANDE", f"el pedido supera los {PEDIDO_MAX} bytes")
+    return tamanos, operaciones
+
+
+def subidos(declarados, encontrados):
+    """Lo que el cliente subió directo al bucket, antes de crear el job: que cada archivo esté, pese lo declarado,
+    empiece como un PNG o un JPEG y no pase de PIXELES_MAX. `encontrados` es `(tamaño, primeros bytes)` o None.
+
+    Se mira sólo el encabezado (formato y dimensiones). Que el resto no esté corrupto lo descubre el split al
+    decodificarlo y el job queda en `failed` con ARCHIVO_INVALIDO: verificarlo acá obligaría al backend a bajar los
+    100 MB que justamente dejaron de pasar por él.
+    """
+    detalles = []
+    for i, (declarado, encontrado) in enumerate(zip(declarados, encontrados, strict=True)):
+        campo = f"archivos[{i}]"
+        if encontrado is None:
+            detalles.append({"campo": campo, "problema": "no está en el bucket: subilo con su URL antes de confirmar"})
+            continue
+        tamano, inicio = encontrado
+        if tamano != declarado:
+            detalles.append({"campo": campo, "problema": f"pesa {tamano} bytes y se declararon {declarado}"})
+        elif not (inicio.startswith(b"\x89PNG\r\n\x1a\n") or inicio.startswith(b"\xff\xd8\xff")):
+            detalles.append({"campo": campo, "problema": "no es PNG ni JPEG"})
+        else:
+            try:
+                with Image.open(io.BytesIO(inicio)) as imagen:
+                    ancho, alto = imagen.size
+            except Exception:  # un encabezado más largo que lo leído (un JPEG con mucho EXIF): lo decide el split
+                continue
+            if ancho * alto > PIXELES_MAX:
+                raise ErrorApi("ARCHIVO_DEMASIADO_GRANDE",
+                               f"el archivo {i} tiene {ancho}x{alto}: más de {PIXELES_MAX} píxeles")
+    if detalles:
+        raise ErrorApi("ARCHIVO_INVALIDO", "hay archivos que no se subieron bien", detalles)
 
 
 def tamanos(archivos):

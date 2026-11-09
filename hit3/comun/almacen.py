@@ -21,9 +21,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import requests
 
+from comun import dinamico
+
 GCS = "https://storage.googleapis.com"
 ALCANCE = "https://www.googleapis.com/auth/devstorage.read_write"
-HILOS = 8  # subidas y bajadas en paralelo de un mismo pedido (archivos de un job, fragmentos de un archivo)
+HILOS = 8  # subidas y bajadas en paralelo de un mismo pedido, si no hay Redis para leer la perilla `hilos_almacen`
+CABECERA = 64 * 1024  # bytes del principio de una imagen que alcanzan para leer su formato y sus dimensiones
 SALUD_CADA = 10  # s que se recuerda el resultado de `vivo`: las probes preguntan seguido
 
 
@@ -40,11 +43,12 @@ def nombre_de(clave):
 
 
 class Almacen:
-    """Un bucket de GCS (o del emulador) con lo justo: guardar, leer y borrar objetos."""
+    """Un bucket de GCS (o del emulador) con lo justo: guardar, leer, borrar y abrir subidas directas."""
 
-    def __init__(self, bucket, url=None, sesion=None, timeout=60):
+    def __init__(self, bucket, url=None, sesion=None, timeout=60, url_publica=None):
         self.bucket = bucket
         self.url = (url or GCS).rstrip("/")
+        self.url_publica = (url_publica or self.url).rstrip("/")  # la del emulador, como la ve el cliente
         self.emulador = url is not None
         self.timeout = timeout
         self._sesion = sesion
@@ -87,6 +91,39 @@ class Almacen:
         respuesta = self._pedir("GET", self._objeto(nombre), (200, 404), params={"alt": "media"})
         return respuesta.content if respuesta.status_code == 200 else None
 
+    def iniciar_subida(self, nombre, tamano):
+        """Abre una sesión de subida resumable para `nombre` y devuelve su URL (contrato §2b).
+
+        Quien tiene la URL sube con un PUT, sin credenciales: la URL misma es la autorización, como una URL firmada.
+        Sirve sólo para ese objeto, declara `tamano` bytes (X-Upload-Content-Length; el backend lo revisa al
+        confirmar) y GCS la invalida a la semana. La abre el backend con su identidad (Workload Identity): una URL
+        firmada V4 necesitaría una cuenta de servicio de Google con clave o el permiso signBlob, y los pods no tienen
+        ninguna de las dos.
+        """
+        respuesta = self._pedir("POST", f"{self.url}/upload/storage/v1/b/{self.bucket}/o", (200, 201),
+                                params={"uploadType": "resumable", "name": nombre},
+                                headers={"X-Upload-Content-Length": str(tamano)}, json={})
+        ubicacion = respuesta.headers.get("Location")
+        if not ubicacion:
+            raise NoDisponible(f"el bucket no devolvió la URL de la sesión de subida de {nombre}")
+        if self.emulador:  # fake-gcs arma la URL con su dirección interna: el cliente lo ve en url_publica
+            publica, sesion = urllib.parse.urlsplit(self.url_publica), urllib.parse.urlsplit(ubicacion)
+            ubicacion = urllib.parse.urlunsplit((publica.scheme, publica.netloc, sesion.path, sesion.query, ""))
+        return ubicacion
+
+    def inicio(self, nombre, cuantos=CABECERA):
+        """`(tamaño total, primeros bytes)` del objeto, o None si no existe. Pide un rango: no baja el resto."""
+        respuesta = self._pedir("GET", self._objeto(nombre), (200, 206, 404, 416), params={"alt": "media"},
+                                headers={"Range": f"bytes=0-{cuantos - 1}"})
+        if respuesta.status_code == 404:
+            return None
+        if respuesta.status_code == 416:  # el objeto está vacío
+            return 0, b""
+        total = respuesta.headers.get("Content-Range", "").rpartition("/")[2]
+        if not total.isdigit():  # 200: el objeto entero (más chico que el rango, o un servidor que no los entiende)
+            total = len(respuesta.content)
+        return int(total), respuesta.content[:cuantos]
+
     def borrar(self, nombres):
         """Borra los objetos; uno que ya no está no es un error (una reentrega puede borrar dos veces)."""
         nombres = list(nombres)
@@ -122,6 +159,7 @@ class AlmacenMemoria:
 
     def __init__(self):
         self.objetos = {}
+        self.subidas = {}  # nombre -> tamaño de las sesiones de subida abiertas
         self.caido = False
 
     def _revisar(self):
@@ -136,6 +174,16 @@ class AlmacenMemoria:
         self._revisar()
         return self.objetos.get(nombre)
 
+    def iniciar_subida(self, nombre, tamano):
+        self._revisar()
+        self.subidas[nombre] = tamano
+        return f"https://storage.googleapis.com/upload/storage/v1/b/memoria/o?uploadType=resumable&upload_id={nombre}"
+
+    def inicio(self, nombre, cuantos=CABECERA):
+        self._revisar()
+        datos = self.objetos.get(nombre)
+        return None if datos is None else (len(datos), datos[:cuantos])
+
     def borrar(self, nombres):
         self._revisar()
         for nombre in nombres:
@@ -149,11 +197,13 @@ class AlmacenMemoria:
 
 
 def desde_entorno():
-    """SOBEL_ALMACEN_BUCKET (obligatoria) y SOBEL_ALMACEN_URL (sólo para el emulador)."""
+    """SOBEL_ALMACEN_BUCKET (obligatoria); SOBEL_ALMACEN_URL y SOBEL_ALMACEN_URL_PUBLICA, sólo para el emulador (la
+    segunda es cómo lo alcanza el cliente que sube directo: en GKE las URLs de subida ya son de storage.googleapis.com)."""
     bucket = os.environ.get("SOBEL_ALMACEN_BUCKET")
     if not bucket:
         raise RuntimeError("falta la variable de entorno SOBEL_ALMACEN_BUCKET")
-    return Almacen(bucket, url=os.environ.get("SOBEL_ALMACEN_URL") or None)
+    return Almacen(bucket, url=os.environ.get("SOBEL_ALMACEN_URL") or None,
+                   url_publica=os.environ.get("SOBEL_ALMACEN_URL_PUBLICA") or None)
 
 
 # --- el puntero en Redis -----------------------------------------------------------------------------------------
@@ -168,7 +218,7 @@ def escribir(redis, almacen, clave, datos, ttl):
 def escribir_varios(redis, almacen, pares, ttl):
     """Como `escribir` para varios (clave, datos): sube en paralelo y deja todos los punteros juntos."""
     pares = list(pares)
-    with ThreadPoolExecutor(max_workers=HILOS) as hilos:
+    with ThreadPoolExecutor(max_workers=dinamico.leer(redis)["hilos_almacen"]) as hilos:
         list(hilos.map(lambda par: almacen.guardar(nombre_de(par[0]), par[1]), pares))
     with redis.pipeline() as tuberia:
         for clave, _ in pares:
@@ -185,7 +235,7 @@ def leer(redis, almacen, clave):
 def leer_varios(redis, almacen, claves):
     """Como `leer` para varias claves, en el mismo orden; baja en paralelo."""
     punteros = redis.mget(claves) if claves else []
-    with ThreadPoolExecutor(max_workers=HILOS) as hilos:
+    with ThreadPoolExecutor(max_workers=dinamico.leer(redis)["hilos_almacen"]) as hilos:
         return list(hilos.map(lambda p: None if p is None else almacen.leer(p.decode()), punteros))
 
 

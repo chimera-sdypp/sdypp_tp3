@@ -49,3 +49,19 @@ def test_el_puntero_en_redis_y_los_bytes_en_el_bucket(bucket):
 def test_vivo_contra_el_emulador(bucket):
     assert bucket.vivo()
     assert not Almacen("no-existe-este-bucket", url=URL).vivo()
+
+
+def test_subida_directa_con_la_url_de_la_sesion_resumable(bucket):
+    import requests
+    datos = b"\x89PNG\r\n\x1a\n" + os.urandom(5 * 1024 * 1024)
+    publico = Almacen(bucket.bucket, url=URL, url_publica=URL)  # el cliente ve el emulador en la misma dirección
+
+    url = publico.iniciar_subida("job/j1/entrada/0.png", len(datos))
+    assert url.startswith(URL)
+    # El cliente sube con un PUT sin credenciales: la URL es la autorización.
+    respuesta = requests.put(url, data=datos, timeout=60)
+    assert respuesta.status_code in (200, 201), respuesta.text
+
+    assert bucket.inicio("job/j1/entrada/0.png", cuantos=8) == (len(datos), datos[:8])
+    assert bucket.leer("job/j1/entrada/0.png") == datos
+    assert bucket.inicio("job/j1/entrada/1.png") is None

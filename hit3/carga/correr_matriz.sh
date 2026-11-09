@@ -27,6 +27,7 @@ NAMESPACE="${SOBEL_NAMESPACE:-sobel}"
 DEPLOY_WORKER="${SOBEL_DEPLOY_WORKER:-sobel-worker}"
 V3_VALORES="${V3_VALORES:-2 4}"
 V1_VALORES="${V1_VALORES:-1mb 10mb}"
+PRESIGNED="${PRESIGNED:-false}"
 K6_IMAGEN="grafana/k6:1.8.1"
 LIMITE_PEDIDO=$((200 * 1024 * 1024))  # contrato: un pedido de más de 200 MiB recibe 413
 
@@ -113,7 +114,7 @@ correr_celda() {
   # k6 sale con error si no se cumple un threshold: es un resultado de la celda, no un fallo del runner.
   "${K6_CMD[@]}" \
     --env TARGET_URL="$TARGET_URL" --env VA="$va" --env VB="$vb" --env VC="$vc" --env V1="$v1" \
-    --env V3="$v3" --env DURATION="$dur" --env RAMP_UP="$RAMP_UP" \
+    --env V3="$v3" --env DURATION="$dur" --env RAMP_UP="$RAMP_UP" --env PRESIGNED="$PRESIGNED" \
     --summary-export="$CORRIDA/$nombre.json" \
     matriz_r5.js || true
   wait
@@ -125,12 +126,17 @@ generar_informe() {
     echo "# Matriz R5 — $(date '+%Y-%m-%d %H:%M')"
     echo
     echo "Destino: \`$TARGET_URL\` · ramp-up $RAMP_UP · meseta $DURATION (salvo que la celda diga otra cosa)."
+    if [ "$PRESIGNED" = "true" ]; then
+      echo
+      echo "**Subida directa al bucket** (contrato §2b): \`POST\` es la reserva más la confirmación (lo que tarda el"
+      echo "backend); la subida al bucket va aparte. \`Cliente\` es desde que empieza a mandar hasta ver el job en \`done\`."
+    fi
     echo
     echo "Una celda **cumple** si: p95 de \`POST /jobs\` ≤ 1 s; p95 de \`tiempos_s.total\` ≤ 30 s para pedidos de"
     echo "hasta 10 MiB en total (≤ 120 s si son más grandes); y menos de 1 % de errores no provocados (contrato §8)."
     echo
-    echo "| VA | VB | VC | V1 | V3 | Falla | p95 POST (ms) | p95 total (s) | Errores (%) | Req/s | Resultado |"
-    echo "|---|---|---|---|---|---|---|---|---|---|---|"
+    echo "| VA | VB | VC | V1 | V3 | Falla | p95 POST (ms) | p95 subida (s) | p95 total (s) | p95 cliente (s) | Errores (%) | Req/s | Resultado |"
+    echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
   } > "$informe"
   for archivo in "$CORRIDA"/celda_*.json; do
     [ -e "$archivo" ] || continue
@@ -146,14 +152,18 @@ post = m.get("post_jobs_duration", {}).get("p(95)")
 total = m.get("job_total_duration", {}).get("p(95)")
 errores = m.get("slo_unexpected_errors", {}).get("value")
 rps = m.get("http_reqs", {}).get("rate", 0)
+subida = m.get("subida_bucket_duration", {}).get("p(95)")
+cliente = m.get("cliente_total_duration", {}).get("p(95)")
+subida = "—" if subida is None else f"{subida / 1000:.2f}"
+cliente = "—" if cliente is None else f"{cliente / 1000:.2f}"
 umbral = 120 if int(va) * os.path.getsize(f"{datos}/img_{v1}.png") > 10 * 1024 * 1024 else 30
 if post is None or total is None or errores is None:
     # Sin muestras no hay medición: no se puede dar por cumplida
-    resultado, celdas = "**SIN DATOS**", ["—", "—", "—"]
+    resultado, celdas = "**SIN DATOS**", ["—", subida, "—", cliente, "—"]
 else:
     ok = post <= 1000 and total / 1000 <= umbral and errores < 0.01
     resultado = "**CUMPLE**" if ok else "**NO CUMPLE**"
-    celdas = [f"{post:.0f}", f"{total / 1000:.2f} (≤ {umbral})", f"{errores * 100:.2f}"]
+    celdas = [f"{post:.0f}", subida, f"{total / 1000:.2f} (≤ {umbral})", cliente, f"{errores * 100:.2f}"]
 print(f"| {va} | {vb} | {vc} | {v1} | {v3} | {falla} | {' | '.join(celdas)} | {rps:.2f} | {resultado} |")
 EOF
   done
@@ -215,7 +225,8 @@ case "${1:-ayuda}" in
     sed -n '6,11p' "$0" | sed 's/^# \?//'
     echo
     echo "Variables: TARGET_URL (default http://localhost), DURATION (30s), RAMP_UP (5s),"
-    echo "  V3_VALORES (\"2 4\"), V1_VALORES (\"1mb 10mb\"), SOBEL_NAMESPACE (sobel), SOBEL_DEPLOY_WORKER (sobel-worker)"
+    echo "  V3_VALORES (\"2 4\"), V1_VALORES (\"1mb 10mb\"), SOBEL_NAMESPACE (sobel), SOBEL_DEPLOY_WORKER (sobel-worker),"
+    echo "  PRESIGNED (false; true sube directo al bucket: POST /jobs/presigned + PUT + confirmar)"
     rmdir "$CORRIDA" 2>/dev/null || true
     ;;
 esac

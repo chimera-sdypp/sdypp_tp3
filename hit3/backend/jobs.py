@@ -5,12 +5,15 @@ import math
 import time
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from comun import almacen as punteros
+from comun import claves
 
 ESTADOS = ("queued", "processing", "done", "failed", "dlq")
 TERMINADOS_MAX = 1000
+RESERVA_S = 900  # cuánto espera una reserva de POST /jobs/presigned a que el cliente suba y confirme
 
 
 def ahora_ms():
@@ -23,21 +26,92 @@ def crear(redis, almacen, ttl, usuario, operaciones, contenidos):
     Los archivos van primero: si el bucket no responde (NoDisponible), el job no llega a existir.
     """
     job_id, creado = str(uuid.uuid4()), ahora_ms()
-    clave = f"job:{job_id}"
-    punteros.escribir_varios(redis, almacen, [(f"{clave}:entrada:{a}", datos) for a, datos in enumerate(contenidos)],
+    punteros.escribir_varios(redis, almacen, [(claves.entrada(job_id, a), datos) for a, datos in enumerate(contenidos)],
                              ttl)
     tuberia = redis.pipeline()
+    _registrar(tuberia, job_id, creado, ttl, usuario, operaciones, len(contenidos))
+    tuberia.execute()
+    return job_id, creado
+
+
+def _registrar(tuberia, job_id, creado, ttl, usuario, operaciones, archivos):
+    """Anota en `tuberia` el hash del job en `queued` y lo suma a los índices de /jobs."""
+    clave = claves.job(job_id)
     tuberia.hset(clave, mapping={
         "usuario": usuario, "estado": "queued", "creado": creado, "operaciones": json.dumps(operaciones),
-        "archivos": len(contenidos), "fragmentos_total": 0, "completos": 0, "en_dlq": 0, "reintentos": 0,
+        "archivos": archivos, "fragmentos_total": 0, "completos": 0, "en_dlq": 0, "reintentos": 0,
         "cola_ms": 0, "cola_n": 0, "proc_ms": 0, "proc_n": 0,
     })
     tuberia.expire(clave, ttl)
     for indice in ("jobs", f"jobs:{usuario}"):
         tuberia.zadd(indice, {job_id: creado})
         tuberia.expire(indice, ttl)
-    tuberia.execute()
-    return job_id, creado
+
+
+def reservar(redis, almacen, usuario, operaciones, tamanos, hilos, segundos=RESERVA_S):
+    """Abre una sesión de subida al bucket por archivo y anota la reserva (contrato §2b). Devuelve (job_id, urls).
+
+    Todavía no hay job: lo crea `confirmar`, cuando los archivos ya están en el bucket. Si nadie confirma, la
+    reserva vence a los `segundos` y lo que se haya subido lo borra la regla de vencimiento del bucket.
+    """
+    job_id = str(uuid.uuid4())
+    nombres = [punteros.nombre_de(claves.entrada(job_id, a)) for a in range(len(tamanos))]
+    with ThreadPoolExecutor(max_workers=min(hilos, len(nombres))) as pool:
+        urls = list(pool.map(almacen.iniciar_subida, nombres, tamanos))
+    clave = claves.reserva(job_id)
+    with redis.pipeline() as tuberia:
+        tuberia.hset(clave, mapping={"usuario": usuario, "operaciones": json.dumps(operaciones),
+                                     "tamanos": json.dumps(tamanos)})
+        tuberia.expire(clave, segundos)
+        tuberia.execute()
+    return job_id, urls
+
+
+def leer_reserva(redis, job_id):
+    """La reserva como {usuario, operaciones, tamanos}, o None si no existe, venció o ya se confirmó."""
+    datos = _texto(redis.hgetall(claves.reserva(job_id)))
+    if not datos:
+        return None
+    return {"usuario": datos["usuario"], "operaciones": json.loads(datos["operaciones"]),
+            "tamanos": json.loads(datos["tamanos"])}
+
+
+def confirmar(redis, job_id, ttl, reserva):
+    """Convierte la reserva en un job en `queued` que apunta a los archivos que subió el cliente.
+
+    Devuelve el `creado` (ms), o None si la reserva ya no estaba. Va en una transacción que vigila la reserva:
+    de dos confirmaciones simultáneas del mismo job, una crea el job y la otra recibe None (no se encola dos veces).
+    """
+    clave_reserva = claves.reserva(job_id)
+    creado = ahora_ms()
+
+    def escribir(tuberia):
+        if not tuberia.exists(clave_reserva):
+            return None
+        tuberia.multi()
+        tuberia.delete(clave_reserva)
+        for archivo in range(len(reserva["tamanos"])):  # los objetos ya están: sólo faltan los punteros
+            clave = claves.entrada(job_id, archivo)
+            tuberia.set(clave, punteros.nombre_de(clave), ex=ttl)
+        _registrar(tuberia, job_id, creado, ttl, reserva["usuario"], reserva["operaciones"], len(reserva["tamanos"]))
+        return creado
+
+    return redis.transaction(escribir, clave_reserva, value_from_callable=True)
+
+
+def devolver_reserva(redis, job_id, reserva, segundos=RESERVA_S):
+    """Deshace `confirmar` si no se pudo encolar: el job vuelve a ser una reserva y los archivos quedan en el
+    bucket, así el cliente reintenta la confirmación sin volver a subirlos."""
+    archivos = len(reserva["tamanos"])
+    clave = claves.reserva(job_id)
+    with redis.pipeline() as tuberia:
+        tuberia.delete(claves.job(job_id), *[claves.entrada(job_id, a) for a in range(archivos)])
+        tuberia.zrem("jobs", job_id)
+        tuberia.zrem(f"jobs:{reserva['usuario']}", job_id)
+        tuberia.hset(clave, mapping={"usuario": reserva["usuario"], "operaciones": json.dumps(reserva["operaciones"]),
+                                     "tamanos": json.dumps(reserva["tamanos"])})
+        tuberia.expire(clave, segundos)
+        tuberia.execute()
 
 
 def borrar(redis, almacen, job_id, usuario, archivos):

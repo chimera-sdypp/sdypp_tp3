@@ -69,8 +69,9 @@ def test_no_disponible_se_reintenta_como_una_caida_de_conexion():
 
 
 class Respuesta:
-    def __init__(self, codigo, contenido=b""):
+    def __init__(self, codigo, contenido=b"", cabeceras=None):
         self.status_code, self.content, self.text = codigo, contenido, contenido.decode(errors="replace")
+        self.headers = cabeceras or {}
 
 
 class SesionFalsa:
@@ -78,10 +79,12 @@ class SesionFalsa:
 
     def __init__(self, *respuestas):
         self.pedidos = []
+        self.cabeceras = []
         self.respuestas = list(respuestas)
 
     def request(self, metodo, url, **opciones):
         self.pedidos.append((metodo, url, opciones.get("params")))
+        self.cabeceras.append(opciones.get("headers"))
         respuesta = self.respuestas.pop(0)
         if isinstance(respuesta, Exception):
             raise respuesta
@@ -142,3 +145,79 @@ def test_desde_entorno_exige_el_bucket(monkeypatch):
     monkeypatch.setenv("SOBEL_ALMACEN_URL", "http://emulador:4443")
     bucket = almacen.desde_entorno()
     assert (bucket.bucket, bucket.url, bucket.emulador) == ("imagenes", "http://emulador:4443", True)
+
+
+SESION_GCS = ("https://storage.googleapis.com/upload/storage/v1/b/imagenes/o?uploadType=resumable"
+              "&name=job%2Fj1%2Fentrada%2F0.png&upload_id=ABC")
+
+
+def test_iniciar_subida_abre_una_sesion_resumable_que_exige_el_tamano_declarado():
+    sesion = SesionFalsa(Respuesta(200, cabeceras={"Location": SESION_GCS}))
+    url = Almacen("imagenes", sesion=sesion).iniciar_subida("job/j1/entrada/0.png", 1234)
+
+    assert url == SESION_GCS
+    assert sesion.pedidos == [("POST", "https://storage.googleapis.com/upload/storage/v1/b/imagenes/o",
+                               {"uploadType": "resumable", "name": "job/j1/entrada/0.png"})]
+    assert sesion.cabeceras[0] == {"X-Upload-Content-Length": "1234"}
+
+
+def test_con_el_emulador_la_url_de_subida_apunta_a_donde_lo_ve_el_cliente():
+    interna = "http://0.0.0.0:4443/upload/storage/v1/b/imagenes/o?uploadType=resumable&upload_id=ABC"
+    sesion = SesionFalsa(Respuesta(200, cabeceras={"Location": interna}))
+    bucket = Almacen("imagenes", url="http://almacen:4443", sesion=sesion, url_publica="http://localhost:4443")
+    assert (bucket.iniciar_subida("job/j1/entrada/0.png", 10)
+            == "http://localhost:4443/upload/storage/v1/b/imagenes/o?uploadType=resumable&upload_id=ABC")
+
+
+def test_sin_location_la_subida_no_se_pudo_abrir():
+    with pytest.raises(NoDisponible):
+        Almacen("imagenes", sesion=SesionFalsa(Respuesta(200))).iniciar_subida("a.png", 10)
+
+
+def test_inicio_pide_solo_un_rango_y_saca_el_tamano_total_de_content_range():
+    sesion = SesionFalsa(Respuesta(206, b"\x89PNG", {"Content-Range": "bytes 0-3/104857600"}), Respuesta(404),
+                         Respuesta(200, b"chico"))
+    bucket = Almacen("imagenes", sesion=sesion)
+
+    assert bucket.inicio("job/j1/entrada/0.png", cuantos=4) == (104857600, b"\x89PNG")
+    assert sesion.cabeceras[0] == {"Range": "bytes=0-3"}
+    assert bucket.inicio("job/j1/entrada/1.png") is None
+    assert bucket.inicio("job/j1/entrada/2.png") == (5, b"chico")  # más chico que el rango: vino entero
+
+
+def test_inicio_en_memoria(memoria):
+    memoria.guardar("a.png", b"0123456789")
+    assert memoria.inicio("a.png", cuantos=4) == (10, b"0123")
+    assert memoria.inicio("b.png") is None
+
+
+def test_la_configuracion_dinamica_pisa_los_valores_por_defecto(redis, monkeypatch):
+    from comun import dinamico
+    monkeypatch.setenv("SOBEL_MAX_PARTES", "20")
+    monkeypatch.setenv("SOBEL_PNG_NIVEL", "99")  # fuera de rango: queda el del código
+    assert dinamico.leer(redis)["max_partes"] == 20 and dinamico.leer(redis)["png_nivel"] == 1
+
+    redis.hset("config:dinamica", mapping={"max_partes": 4, "png_nivel": "x", "otra": 3})  # inválidas: se ignoran
+    assert dinamico.personalizadas(redis) == {"max_partes": 4}
+    assert dinamico.leer(redis)["max_partes"] == 4
+
+    dinamico.actualizar(redis, {"max_partes": None, "hilos_almacen": 2})
+    assert dinamico.personalizadas(redis) == {"hilos_almacen": 2} and dinamico.leer(redis)["max_partes"] == 20
+
+
+def test_la_configuracion_dinamica_valida_todo_junto():
+    from comun import dinamico
+    assert dinamico.validar({"png_nivel": 9, "max_partes": None}) == ({"png_nivel": 9, "max_partes": None}, [])
+    _, detalles = dinamico.validar({"png_nivel": 10, "max_partes": True, "otra": 1})
+    assert [d["campo"] for d in detalles] == ["png_nivel", "max_partes", "otra"]
+    assert dinamico.validar({})[1] and dinamico.validar([1])[1]
+
+
+def test_sin_redis_la_configuracion_es_la_por_defecto():
+    from comun import dinamico
+
+    class RedisCaido:
+        def hgetall(self, clave):
+            raise ConnectionError("caído")
+
+    assert dinamico.leer(RedisCaido()) == dinamico.por_defecto()
